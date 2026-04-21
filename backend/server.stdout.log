@@ -1,0 +1,24 @@
+[dotenv@17.3.1] injecting env (14) from .env -- tip: 🛡️ auth for agents: https://vestauth.com
+[server] running on http://localhost:5000
+[server] API base available at http://localhost:5000/api
+[server] health check available at http://localhost:5000/api/health
+[0mGET /api/health [31m503[0m 4.616 ms - 207[0m
+{"level":"info","message":"request.completed","method":"GET","path":"/api/health","statusCode":503,"durationMs":9,"origin":null}
+[db] MongoDB connected: 127.0.0.1/carbon_footprint_app
+[0mGET /api/health [32m200[0m 2.185 ms - 207[0m
+{"level":"info","message":"request.completed","method":"GET","path":"/api/health","statusCode":200,"durationMs":58,"origin":null}
+[auth.signup] attempt {
+  method: 'POST',
+  path: '/api/auth/signup',
+  origin: null,
+  email: 'codex.auth.test+3b3e39b2@example.com'
+}
+[0mPOST /api/auth/signup [32m201[0m 933.504 ms - 840[0m
+{"level":"info","message":"request.completed","method":"POST","path":"/api/auth/signup","statusCode":201,"durationMs":934,"origin":null}
+[auth.login] attempt {
+  method: 'POST',
+  path: '/api/auth/login',
+  origin: null,
+  email: 'codex.auth.test+3b3e39b2@example.com'
+}
+[0mPOST /api/auth/login [32m200[0m 848.819 ms - 831[0m
