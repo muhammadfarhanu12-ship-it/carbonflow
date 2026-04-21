@@ -15,6 +15,11 @@ export interface SignupData {
   confirmPassword?: string;
 }
 
+export interface SignupResponse {
+  email: string;
+  verificationRequired: boolean;
+}
+
 export interface SigninData {
   email: string;
   password: string;
@@ -73,15 +78,19 @@ class AuthService {
     };
   }
 
-  async signup(data: SignupData): Promise<AuthResponse> {
-    const response = await apiClient.post<BackendAuthPayload>("/auth/signup", {
+  async signup(data: SignupData): Promise<SignupResponse> {
+    const response = await apiClient.post<{ email?: string; verificationRequired?: boolean }>("/auth/signup", {
       name: data.name,
       email: data.email,
       password: data.password,
       confirmPassword: data.confirmPassword || data.password,
       companyName: data.company || undefined,
     });
-    return this.normalizeAuthResponse(response);
+
+    return {
+      email: response?.email || data.email,
+      verificationRequired: response?.verificationRequired ?? true,
+    };
   }
 
   async signin(data: SigninData): Promise<AuthResponse> {
@@ -103,6 +112,34 @@ class AuthService {
       password,
       confirmPassword: password,
     });
+  }
+
+  async verifyEmail(token: string): Promise<void> {
+    const normalizedToken = String(token || "").trim();
+
+    if (!normalizedToken) {
+      throw new Error("Verification token is required");
+    }
+
+    await apiClient.post("/auth/verify-email", {
+      token: normalizedToken,
+    });
+  }
+
+  async resendVerification(email: string): Promise<{ email: string }> {
+    const normalizedEmail = String(email || "").trim();
+
+    if (!normalizedEmail) {
+      throw new Error("Email is required");
+    }
+
+    const response = await apiClient.post<{ email?: string }>("/auth/resend-verification", {
+      email: normalizedEmail,
+    });
+
+    return {
+      email: response?.email || normalizedEmail,
+    };
   }
 
   async getCurrentUser(): Promise<SessionUser> {

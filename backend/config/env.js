@@ -48,6 +48,7 @@ const clientUrls = parseList(
   process.env.CLIENT_URLS,
   [process.env.CLIENT_URL || "http://localhost:5173"],
 );
+const frontendUrl = parseString(process.env.FRONTEND_URL, clientUrls[0] || "http://localhost:5173");
 const adminClientUrls = parseList(
   process.env.ADMIN_CLIENT_URLS,
   [process.env.ADMIN_CLIENT_URL || "http://localhost:3001"],
@@ -62,6 +63,7 @@ const env = {
   baseUrl: process.env.BASE_URL || "http://localhost:5000",
   clientUrl: clientUrls[0] || "http://localhost:5173",
   clientUrls,
+  frontendUrl,
   adminClientUrl: adminClientUrls[0] || "http://localhost:3001",
   adminClientUrls,
   allowedOrigins,

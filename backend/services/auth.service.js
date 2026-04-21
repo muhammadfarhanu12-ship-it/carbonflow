@@ -48,6 +48,7 @@ class AuthService {
       email: payload.email,
       password,
       role: payload.role || "USER",
+      isVerified: true,
     });
 
     return this.buildAuthResponse(user);

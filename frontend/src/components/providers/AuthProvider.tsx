@@ -1,6 +1,6 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { authService, type SigninData, type SignupData, type User } from "@/src/services/authService";
+import { authService, type SigninData, type SignupData, type SignupResponse, type User } from "@/src/services/authService";
 import type { AuthResponse } from "@/src/types/platform";
 
 export interface AuthContextValue {
@@ -8,7 +8,7 @@ export interface AuthContextValue {
   isAuthenticated: boolean;
   isLoading: boolean;
   signin: (data: SigninData) => Promise<AuthResponse>;
-  signup: (data: SignupData) => Promise<AuthResponse>;
+  signup: (data: SignupData) => Promise<SignupResponse>;
   logout: () => Promise<void>;
 }
 

@@ -66,9 +66,17 @@ export function SigninPage() {
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
-                className="p-3 rounded-md bg-destructive/10 text-destructive text-sm font-medium"
+                className="p-3 rounded-md bg-destructive/10 text-destructive text-sm font-medium space-y-2"
               >
-                {error}
+                <p>{error}</p>
+                {error.toLowerCase().includes('verify your email') && email && (
+                  <Link
+                    to={`/verify-email?email=${encodeURIComponent(email)}`}
+                    className="inline-block text-primary hover:text-primary/80 transition-colors"
+                  >
+                    Resend verification email
+                  </Link>
+                )}
               </motion.div>
             )}
 

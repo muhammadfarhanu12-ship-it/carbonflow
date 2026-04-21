@@ -5,9 +5,11 @@ const mongoose = require("mongoose");
 const { body, validationResult, matchedData } = require("express-validator");
 const { User } = require("../models");
 const env = require("../config/env");
-const { sendResetPasswordEmail, sendWelcomeEmail } = require("../services/emailService");
+const { sendResetPasswordEmail, sendWelcomeEmail, sendEmailVerificationEmail } = require("../services/emailService");
 const UserContextService = require("../services/userContext.service");
 const { sendSuccess, sendError } = require("../utils/apiResponse");
+
+const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
 
 function createValidationError(message, errors = []) {
   const error = new Error(message);
@@ -43,6 +45,49 @@ function logAuthFailure(scope, error, req) {
     statusCode: error.statusCode || error.status || 500,
     message: error.message,
     stack: error.stack,
+  });
+}
+
+function createEmailVerificationToken() {
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+
+  return {
+    rawToken,
+    tokenHash,
+    expiresAt: Date.now() + EMAIL_VERIFICATION_TTL_MS,
+  };
+}
+
+function buildEmailVerificationUrl(token) {
+  try {
+    const verificationUrl = new URL("/verify-email", env.frontendUrl || env.clientUrl || "http://localhost:5173");
+    verificationUrl.searchParams.set("token", token);
+    return verificationUrl.toString();
+  } catch {
+    return `http://localhost:5173/verify-email?token=${token}`;
+  }
+}
+
+async function issueEmailVerificationToken(user, source = "auth.flow") {
+  const { rawToken, tokenHash, expiresAt } = createEmailVerificationToken();
+
+  console.debug(`[${source}] email verification token generated`, {
+    userId: user.id,
+    email: user.email,
+    rawToken,
+    hashedToken: tokenHash,
+  });
+
+  user.emailVerificationToken = tokenHash;
+  user.emailVerificationExpires = expiresAt;
+  user.isVerified = false;
+  await user.save();
+
+  await sendEmailVerificationEmail({
+    to: user.email,
+    name: user.name,
+    verificationUrl: buildEmailVerificationUrl(rawToken),
   });
 }
 
@@ -98,6 +143,14 @@ exports.loginValidators = [
   body("rememberMe").optional().isBoolean(),
 ];
 
+exports.verifyEmailValidators = [
+  body("token").isString().notEmpty().withMessage("Verification token is required"),
+];
+
+exports.resendVerificationValidators = [
+  body("email").trim().normalizeEmail().isEmail().withMessage("A valid email address is required"),
+];
+
 exports.forgotPasswordValidators = [
   body("email").trim().normalizeEmail().isEmail().withMessage("A valid email address is required"),
 ];
@@ -138,44 +191,27 @@ exports.signup = async (req, res) => {
       throw error;
     }
 
-    const passwordHash = await bcrypt.hash(payload.password, env.auth.bcryptSaltRounds);
     const user = await User.create({
       name: resolvedName,
       email: payload.email,
-      password: passwordHash,
+      password: payload.password,
       role: "ANALYST",
       status: "ACTIVE",
+      isVerified: false,
     });
 
-    await UserContextService.provisionCompanyForUser(user, {
+    const hydratedUser = await UserContextService.provisionCompanyForUser(user, {
       companyName: payload.companyName || payload.company,
     });
 
-    const hydratedUser = await User.findByPk(user.id);
-    const accessToken = generateAccessToken(hydratedUser);
-    const refreshToken = generateRefreshToken(hydratedUser);
-    const authUser = await User.scope("withPassword").findByPk(user.id);
-    await storeRefreshToken(authUser, refreshToken);
-
-    void sendWelcomeEmail({
-      to: hydratedUser.email,
-      name: hydratedUser.name,
-    }).catch((emailError) => {
-      console.error("[auth.signup] welcome email failed", {
-        ...buildRequestMeta(req),
-        userId: hydratedUser.id,
-        message: emailError.message,
-        stack: emailError.stack,
-      });
-    });
+    await issueEmailVerificationToken(hydratedUser, "auth.signup");
 
     return sendSuccess(res, {
       statusCode: 201,
-      message: "User created successfully",
+      message: "Verification email sent. Please check your inbox.",
       data: {
-        user: toSafeUser(hydratedUser),
-        token: accessToken,
-        refreshToken,
+        email: hydratedUser.email,
+        verificationRequired: true,
       },
     });
   } catch (error) {
@@ -226,6 +262,12 @@ exports.login = async (req, res) => {
       throw error;
     }
 
+    if (user.isVerified === false) {
+      const error = new Error("Please verify your email before logging in");
+      error.statusCode = 403;
+      throw error;
+    }
+
     const accessToken = generateAccessToken(user, Boolean(payload.rememberMe));
     const refreshToken = generateRefreshToken(user, Boolean(payload.rememberMe));
     user.lastLoginAt = new Date();
@@ -241,6 +283,123 @@ exports.login = async (req, res) => {
     });
   } catch (error) {
     logAuthFailure("auth.login", error, req);
+    return sendError(res, {
+      statusCode: error.statusCode || error.status || 500,
+      message: error.message || "Internal server error",
+      errors: error.errors || undefined,
+    });
+  }
+};
+
+exports.verifyEmail = async (req, res) => {
+  try {
+    ensureDatabaseReady();
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      throw createValidationError("Validation failed", errors.array());
+    }
+
+    const payload = matchedData(req, { locations: ["body"] });
+    const tokenHash = crypto.createHash("sha256").update(payload.token).digest("hex");
+
+    console.debug("[auth.verifyEmail] token received", {
+      hashedTokenFromRequest: tokenHash,
+    });
+
+    const user = await User.scope("withPassword").findOne({
+      emailVerificationToken: tokenHash,
+      emailVerificationExpires: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      const tokenOwner = await User.scope("withPassword").findOne({
+        emailVerificationToken: tokenHash,
+      });
+
+      if (tokenOwner && tokenOwner.isVerified === true) {
+        return sendError(res, {
+          statusCode: 400,
+          message: "Already verified",
+        });
+      }
+
+      if (tokenOwner) {
+        return sendError(res, {
+          statusCode: 400,
+          message: "Token expired",
+        });
+      }
+
+      return sendError(res, {
+        statusCode: 400,
+        message: "Token invalid",
+      });
+    }
+
+    if (user.isVerified === true) {
+      return sendError(res, {
+        statusCode: 400,
+        message: "Already verified",
+      });
+    }
+
+    user.isVerified = true;
+    user.emailVerificationToken = undefined;
+    user.emailVerificationExpires = undefined;
+    await user.save();
+
+    void sendWelcomeEmail({
+      to: user.email,
+      name: user.name,
+    }).catch((emailError) => {
+      console.error("[auth.verifyEmail] welcome email failed", {
+        userId: user.id,
+        message: emailError.message,
+        stack: emailError.stack,
+      });
+    });
+
+    return sendSuccess(res, {
+      message: "Email verified successfully",
+    });
+  } catch (error) {
+    logAuthFailure("auth.verifyEmail", error, req);
+    return sendError(res, {
+      statusCode: error.statusCode || error.status || 500,
+      message: error.message || "Internal server error",
+      errors: error.errors || undefined,
+    });
+  }
+};
+
+exports.verifyEmailGet = async (_req, res) => sendError(res, {
+  statusCode: 405,
+  message: "Use POST /api/auth/verify-email with token in request body",
+});
+
+exports.resendVerification = async (req, res) => {
+  try {
+    ensureDatabaseReady();
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      throw createValidationError("Validation failed", errors.array());
+    }
+
+    const payload = matchedData(req, { locations: ["body"] });
+    const user = await User.scope("withPassword").findOne({ email: payload.email });
+
+    if (user && user.isVerified === false) {
+      await issueEmailVerificationToken(user, "auth.resendVerification");
+    }
+
+    return sendSuccess(res, {
+      message: "If an unverified account exists for that email, a new verification email has been sent",
+      data: {
+        email: payload.email,
+      },
+    });
+  } catch (error) {
+    logAuthFailure("auth.resendVerification", error, req);
     return sendError(res, {
       statusCode: error.statusCode || error.status || 500,
       message: error.message || "Internal server error",
@@ -363,6 +522,12 @@ exports.refreshToken = async (req, res, next) => {
     if (!isStoredTokenValid) {
       const error = new Error("Refresh token is invalid");
       error.statusCode = 401;
+      throw error;
+    }
+
+    if (user.isVerified === false) {
+      const error = new Error("Please verify your email before logging in");
+      error.statusCode = 403;
       throw error;
     }
 

@@ -69,6 +69,7 @@ async function seedDatabase() {
     password: await bcrypt.hash("password123", 10),
     role: "USER",
     status: "ACTIVE",
+    isVerified: true,
   });
 
   const suppliers = await Supplier.bulkCreate([

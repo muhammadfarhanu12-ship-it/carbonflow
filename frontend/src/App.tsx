@@ -23,6 +23,7 @@ const SettingsPage = lazy(async () => ({ default: (await import("./pages/Setting
 
 const SigninPage = lazy(async () => ({ default: (await import("./pages/auth/SigninPage")).SigninPage }));
 const SignupPage = lazy(async () => ({ default: (await import("./pages/auth/SignupPage")).SignupPage }));
+const VerifyEmailPage = lazy(async () => ({ default: (await import("./pages/auth/VerifyEmailPage")).VerifyEmailPage }));
 const ForgotPasswordPage = lazy(async () => ({ default: (await import("./pages/auth/ForgotPasswordPage")).ForgotPasswordPage }));
 const ResetPasswordPage = lazy(async () => ({ default: (await import("./pages/auth/ResetPasswordPage")).ResetPasswordPage }));
 const Logout = lazy(async () => ({ default: (await import("./pages/auth/Logout")).Logout }));
@@ -58,6 +59,7 @@ export default function App() {
 
                 <Route path="/auth/signin" element={<SigninPage />} />
                 <Route path="/auth/signup" element={<SignupPage />} />
+                <Route path="/verify-email" element={<VerifyEmailPage />} />
                 <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
                 <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
                 <Route path="/auth/logout" element={<Logout />} />

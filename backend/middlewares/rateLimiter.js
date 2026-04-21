@@ -25,6 +25,12 @@ const authRateLimiter = buildLimiter({
   message: "Too many authentication attempts, please try again later",
 });
 
+const resendVerificationRateLimiter = buildLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 6,
+  message: "Too many verification email requests, please try again later",
+});
+
 const adminAuthRateLimiter = buildLimiter({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -58,6 +64,7 @@ const checkoutRateLimiter = buildLimiter({
 module.exports = {
   apiRateLimiter,
   authRateLimiter,
+  resendVerificationRateLimiter,
   adminAuthRateLimiter,
   optimizationRateLimiter,
   aiOptimizationRateLimiter,

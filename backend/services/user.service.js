@@ -123,6 +123,7 @@ class UserService {
       password: passwordHash,
       role: nextRole,
       status: payload.status || "INVITED",
+      isVerified: true,
     });
 
     const createdUser = await User.findById(user.id).populate("company");

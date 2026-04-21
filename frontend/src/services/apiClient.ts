@@ -1,4 +1,4 @@
-import axios, { AxiosError } from "axios";
+import axios, { AxiosError, AxiosHeaders } from "axios";
 import { API_BASE_URL, BACKEND_ORIGIN } from "../config/backend";
 import {
   clearStoredSession,
@@ -136,7 +136,7 @@ const axiosClient = axios.create({
 
 axiosClient.interceptors.request.use((config) => {
   const token = getAccessToken();
-  config.headers = config.headers || {};
+  config.headers = config.headers || new AxiosHeaders();
 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -202,6 +202,8 @@ axiosClient.interceptors.response.use(
       "/auth/forgot-password",
       "/auth/reset-password",
       "/auth/refresh-token",
+      "/auth/verify-email",
+      "/auth/resend-verification",
     ].some((path) => requestPath.includes(path));
     const hadToken = Boolean(getAccessToken());
 

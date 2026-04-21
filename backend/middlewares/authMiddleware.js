@@ -56,6 +56,10 @@ async function resolveUserFromToken(token) {
     throw new ApiError(403, "Your account has been suspended");
   }
 
+  if (user.isVerified === false) {
+    throw new ApiError(403, "Please verify your email before accessing the dashboard");
+  }
+
   const scopedUser = await UserContextService.ensureCompanyContext(user);
 
   return { decoded, user: scopedUser };

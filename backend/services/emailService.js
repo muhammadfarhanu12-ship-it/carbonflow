@@ -43,6 +43,43 @@ function buildWelcomeTemplate({ name, fullName }) {
   };
 }
 
+function buildEmailVerificationTemplate({ name, fullName, verificationUrl }) {
+  const displayName = name || fullName || "there";
+
+  return {
+    subject: "Verify your CarbonFlow account",
+    html: `
+      <div style="background:#f3f4f6;padding:24px 12px;font-family:Arial,sans-serif;color:#111827;">
+        <div style="max-width:600px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+          <div style="background:#16a34a;color:#ffffff;padding:16px 24px;">
+            <h2 style="margin:0;font-size:22px;line-height:1.3;">Verify your CarbonFlow account</h2>
+          </div>
+          <div style="padding:24px;">
+            <p style="margin:0 0 12px;">Hello ${displayName},</p>
+            <p style="margin:0 0 16px;line-height:1.6;">
+              Thanks for starting your CarbonFlow free trial. Please verify your email address to activate your account.
+            </p>
+            <p style="margin:0 0 20px;">
+              <a href="${verificationUrl}" style="display:inline-block;padding:12px 20px;background:#16a34a;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;">
+                Verify Email
+              </a>
+            </p>
+            <p style="margin:0 0 8px;font-size:14px;line-height:1.6;">
+              If the button above does not work, copy and paste this link into your browser:
+            </p>
+            <p style="margin:0 0 16px;word-break:break-all;font-size:14px;color:#065f46;">
+              <a href="${verificationUrl}" style="color:#065f46;">${verificationUrl}</a>
+            </p>
+            <p style="margin:0;font-size:13px;color:#4b5563;">
+              This verification link expires in 24 hours.
+            </p>
+          </div>
+        </div>
+      </div>
+    `,
+  };
+}
+
 function buildBudgetIncreaseTemplate({
   requesterName,
   requesterEmail,
@@ -95,6 +132,16 @@ async function sendWelcomeEmail({ to, name, fullName }) {
   });
 }
 
+async function sendEmailVerificationEmail({ to, name, fullName, verificationUrl }) {
+  const template = buildEmailVerificationTemplate({ name, fullName, verificationUrl });
+
+  await sendEmail({
+    to,
+    subject: template.subject,
+    html: template.html,
+  });
+}
+
 async function sendBudgetIncreaseRequestEmail(payload) {
   const template = buildBudgetIncreaseTemplate(payload);
 
@@ -108,5 +155,6 @@ async function sendBudgetIncreaseRequestEmail(payload) {
 module.exports = {
   sendResetPasswordEmail,
   sendWelcomeEmail,
+  sendEmailVerificationEmail,
   sendBudgetIncreaseRequestEmail,
 };

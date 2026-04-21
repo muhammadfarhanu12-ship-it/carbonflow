@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Eye, EyeOff, Leaf, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
@@ -25,12 +25,12 @@ export function SignupPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [successEmail, setSuccessEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   
   // Password strength
   const [strength, setStrength] = useState(0);
   
-  const navigate = useNavigate();
   const { signup } = useAuth();
 
   useEffect(() => {
@@ -63,11 +63,9 @@ export function SignupPage() {
 
     setIsLoading(true);
     try {
-      await signup({ name, email, password, confirmPassword, company });
+      const response = await signup({ name, email, password, confirmPassword, company });
+      setSuccessEmail(response.email || email);
       setSuccess(true);
-      setTimeout(() => {
-        navigate('/auth/signin');
-      }, 2000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create account');
     } finally {
@@ -116,8 +114,18 @@ export function SignupPage() {
               <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
                 <CheckCircle2 className="h-6 w-6 text-green-600" />
               </div>
-              <h3 className="text-lg font-medium text-foreground mb-2">Account created successfully!</h3>
-              <p className="text-sm text-muted-foreground">Redirecting you to sign in...</p>
+              <h3 className="text-lg font-medium text-foreground mb-2">Check your email to verify your account</h3>
+              <p className="text-sm text-muted-foreground mb-5">
+                We sent a verification link to <span className="font-medium text-foreground">{successEmail}</span>.
+              </p>
+              <div className="flex flex-col gap-3">
+                <Button asChild className="w-full">
+                  <Link to="/auth/signin">Go to Sign In</Link>
+                </Button>
+                <Button asChild variant="outline" className="w-full">
+                  <Link to={`/verify-email?email=${encodeURIComponent(successEmail)}`}>Resend verification email</Link>
+                </Button>
+              </div>
             </motion.div>
           ) : (
             <form className="space-y-5" onSubmit={handleSubmit}>
