@@ -13,6 +13,10 @@ export interface CarbonCreditTransaction {
   projectName: string;
   registry: string;
   vintageYear: number;
+  shipmentId?: string | null;
+  shipmentIds?: string[];
+  shipmentReference?: string | null;
+  shipmentReferences?: string[];
   pricePerTon: number;
   quantity: number;
   totalCost: number;

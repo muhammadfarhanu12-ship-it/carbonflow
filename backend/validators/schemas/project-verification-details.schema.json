@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://carbonflow.app/schemas/project-verification-details.schema.json",
+  "title": "ProjectVerificationDetails",
+  "description": "Verification metadata stored per marketplace carbon project.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "registries",
+    "verificationStatus",
+    "vintageYear",
+    "sdgGoals"
+  ],
+  "properties": {
+    "registries": {
+      "type": "array",
+      "description": "One or more standards where the project is listed.",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "VERRA",
+          "GOLD_STANDARD",
+          "PURO_EARTH"
+        ]
+      }
+    },
+    "verificationStatus": {
+      "type": "string",
+      "enum": [
+        "VERIFIED",
+        "PENDING",
+        "ACTION_REQUIRED"
+      ]
+    },
+    "registryProjectId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 120
+    },
+    "verifiedBy": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 120
+    },
+    "verificationDate": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "methodology": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 160
+    },
+    "vintageYear": {
+      "type": "integer",
+      "minimum": 1990,
+      "maximum": 2100
+    },
+    "sdgGoals": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "SDG_6_CLEAN_WATER",
+          "SDG_7_AFFORDABLE_CLEAN_ENERGY",
+          "SDG_13_CLIMATE_ACTION",
+          "SDG_14_LIFE_BELOW_WATER",
+          "SDG_15_LIFE_ON_LAND"
+        ]
+      }
+    }
+  },
+  "examples": [
+    {
+      "registries": [
+        "VERRA"
+      ],
+      "verificationStatus": "VERIFIED",
+      "registryProjectId": "VCS-3958",
+      "verifiedBy": "Third-party auditor",
+      "verificationDate": "2026-03-18",
+      "methodology": "ARR methodology VM0047",
+      "vintageYear": 2024,
+      "sdgGoals": [
+        "SDG_13_CLIMATE_ACTION",
+        "SDG_15_LIFE_ON_LAND"
+      ]
+    }
+  ]
+}

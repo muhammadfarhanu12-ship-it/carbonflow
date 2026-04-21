@@ -62,6 +62,9 @@ export function TransactionStatus({
   const meta = STATE_META[state];
   const Icon = meta.icon;
   const registryOrHash = transaction?.registryRecordId || transaction?.blockchainHash || "Pending assignment";
+  const linkedShipmentLabel = transaction?.shipmentReferences && transaction.shipmentReferences.length > 0
+    ? transaction.shipmentReferences.join(", ")
+    : transaction?.shipmentReference || "No linked shipment";
 
   return (
     <Card>
@@ -86,7 +89,7 @@ export function TransactionStatus({
             <StatusRow label="Registry / Hash" value={registryOrHash} />
             <StatusRow label="Serial Number" value={transaction.serialNumber || "Pending assignment"} />
             <StatusRow label="Payment Reference" value={transaction.paymentReference || "Pending"} />
-            <StatusRow label="Linked Shipment" value={transaction.shipmentReference || "No linked shipment"} />
+            <StatusRow label="Linked Shipment(s)" value={linkedShipmentLabel} />
             <StatusRow label="Lock Expires" value={transaction.lockExpiresAt ? new Date(transaction.lockExpiresAt).toLocaleString() : "Not reserved"} />
             <StatusRow label="Certificate" value={transaction.certificateMetadata?.certificateUrl ? "Ready" : "Not available"} />
           </div>

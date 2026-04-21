@@ -5,6 +5,10 @@ const currentYear = new Date().getUTCFullYear();
 const checkoutSchema = Joi.object({
   companyName: Joi.string().trim().min(2).max(200).required(),
   projectId: Joi.string().trim().guid({ version: ["uuidv4", "uuidv5"] }).allow(null).default(null),
+  shipmentId: Joi.string().trim().guid({ version: ["uuidv4", "uuidv5"] }).allow(null).default(null),
+  shipmentIds: Joi.array().items(
+    Joi.string().trim().guid({ version: ["uuidv4", "uuidv5"] }),
+  ).unique().max(100).default([]),
   projectName: Joi.string().trim().min(2).max(200).required(),
   registry: Joi.string().trim().min(2).max(120).required(),
   vintageYear: Joi.number().integer().min(2000).max(currentYear + 1).required(),

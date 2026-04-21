@@ -24,7 +24,11 @@ import { ConfirmationModal } from "@/src/components/ConfirmationModal";
 import { CheckoutDetails } from "@/src/components/CheckoutDetails";
 import { MarketplaceCard } from "@/src/components/MarketplaceCard";
 import { CarbonBudgetWidget } from "@/src/components/marketplace/CarbonBudgetWidget";
-import { MarketplaceEmptyState } from "@/src/components/marketplace/MarketplaceEmptyState";
+import {
+  MarketplaceEmptyState,
+  type MarketplaceActiveFilter,
+  type MarketplaceRecommendation,
+} from "@/src/components/marketplace/MarketplaceEmptyState";
 import { ProjectDetailsModal } from "@/src/components/marketplace/ProjectDetailsModal";
 import { useToast } from "@/src/components/providers/ToastProvider";
 import { CheckoutSummary } from "@/src/components/CheckoutSummary";
@@ -33,15 +37,20 @@ import { useCheckoutValidation } from "@/src/hooks/useCheckoutValidation";
 import { authService } from "@/src/services/authService";
 import { creditsService } from "@/src/services/creditsService";
 import { marketplaceService, type ProjectPayload } from "@/src/services/marketplaceService";
+import { shipmentService } from "@/src/services/shipmentService";
 import { socketService } from "@/src/services/socketService";
 import type {
   CarbonCreditTransaction,
   CarbonProject,
   MarketplaceListingStatus,
+  Shipment,
 } from "@/src/types/platform";
 import { cn } from "@/src/utils/cn";
+import { BATCH_OFFSET_SELECTION_STORAGE_KEY } from "@/src/constants/batchOffset";
 
 const MANAGEABLE_ROLES = new Set(["ADMIN", "SUPERADMIN", "MANAGER"]);
+const AUTO_OFFSET_STORAGE_PREFIX = "marketplace.autoOffsetRule";
+const SHIPMENT_BURN_LOOKBACK_DAYS = 90;
 
 const lifecycleFilters: Array<{ label: string; value: "ALL" | MarketplaceListingStatus }> = [
   { label: "All Listings", value: "ALL" },
@@ -54,8 +63,47 @@ const lifecycleFilters: Array<{ label: string; value: "ALL" | MarketplaceListing
 const initialCheckoutForm = {
   companyName: "",
   quantity: 100,
-  shipmentId: null as string | null,
+  shipmentIds: [] as string[],
 };
+
+const initialAutoOffsetRule = {
+  enabled: false,
+  intensityThreshold: 0.8,
+};
+
+const SORT_FILTER_LABELS: Record<MarketplaceSortFilter, string> = {
+  latest: "Latest",
+  price_asc: "Price: Low to High",
+  rating_desc: "Rating: High to Low",
+};
+
+const STATUS_FILTER_LABELS: Record<MarketplaceListingStatus, string> = {
+  DRAFT: "Draft",
+  PUBLISHED: "Published",
+  ARCHIVED: "Archived",
+  SOLD_OUT: "Sold Out",
+};
+
+const FALLBACK_RECOMMENDATIONS: MarketplaceRecommendation[] = [
+  {
+    id: "fallback-blue-carbon",
+    name: "Delta Mangrove Restoration",
+    type: "Blue Carbon",
+    location: "Southeast Asia",
+    pricePerTonUsd: 24,
+    rating: 4.8,
+    registry: "Verra",
+  },
+  {
+    id: "fallback-renewable",
+    name: "Cross-Border Wind Portfolio",
+    type: "Renewable Energy",
+    location: "Central Europe",
+    pricePerTonUsd: 18,
+    rating: 4.7,
+    registry: "Gold Standard",
+  },
+];
 
 function getProjectAvailableInventory(project: CarbonProject | null) {
   if (!project) {
@@ -63,6 +111,22 @@ function getProjectAvailableInventory(project: CarbonProject | null) {
   }
 
   return Math.max(project.availableToPurchase ?? project.availableCredits, 0);
+}
+
+function resolveShipmentOffsetCost(shipment: Shipment) {
+  const reportedCarbonCost = Number(shipment.carbonCostUsd || 0);
+  if (Number.isFinite(reportedCarbonCost) && reportedCarbonCost > 0) {
+    return reportedCarbonCost;
+  }
+
+  const emissionsTonnes = Number(shipment.emissionsTonnes || 0);
+  const carbonPricePerTon = Number(shipment.carbonPricePerTon || 0);
+
+  if (Number.isFinite(emissionsTonnes) && Number.isFinite(carbonPricePerTon) && emissionsTonnes > 0 && carbonPricePerTon > 0) {
+    return emissionsTonnes * carbonPricePerTon;
+  }
+
+  return 0;
 }
 
 function mapProjectToForm(project: CarbonProject): ProjectManagementFormValues {
@@ -131,6 +195,7 @@ function resolveTransactionReference(transaction: CarbonCreditTransaction) {
 export function MarketplacePage() {
   const { showToast } = useToast();
   const sessionUser = authService.getSession().user;
+  const autoOffsetStorageKey = `${AUTO_OFFSET_STORAGE_PREFIX}:${sessionUser?.companyId || "default"}`;
   const canManageListings = MANAGEABLE_ROLES.has(sessionUser?.role || "");
   const [projects, setProjects] = useState<CarbonProject[]>([]);
   const [transactions, setTransactions] = useState<CarbonCreditTransaction[]>([]);
@@ -153,6 +218,10 @@ export function MarketplacePage() {
   const [error, setError] = useState("");
   const [confirmAction, setConfirmAction] = useState<{ type: "archive" | "delete"; project: CarbonProject } | null>(null);
   const [confirmingAction, setConfirmingAction] = useState(false);
+  const [projectedMonthlyShipmentBurnUsd, setProjectedMonthlyShipmentBurnUsd] = useState(0);
+  const [requestingBudgetIncrease, setRequestingBudgetIncrease] = useState(false);
+  const [autoOffsetRule, setAutoOffsetRule] = useState(initialAutoOffsetRule);
+  const [recommendedProjects, setRecommendedProjects] = useState<MarketplaceRecommendation[]>([]);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? projects[0] ?? null,
@@ -176,6 +245,38 @@ export function MarketplacePage() {
     requestedQuantity: checkoutForm.quantity,
     pricePerTon,
   });
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const storedRule = window.localStorage.getItem(autoOffsetStorageKey);
+    if (!storedRule) {
+      setAutoOffsetRule(initialAutoOffsetRule);
+      return;
+    }
+
+    try {
+      const parsedRule = JSON.parse(storedRule) as { enabled?: boolean; intensityThreshold?: number };
+      setAutoOffsetRule({
+        enabled: Boolean(parsedRule.enabled),
+        intensityThreshold: Number.isFinite(Number(parsedRule.intensityThreshold))
+          ? Math.max(Number(parsedRule.intensityThreshold), 0)
+          : initialAutoOffsetRule.intensityThreshold,
+      });
+    } catch {
+      setAutoOffsetRule(initialAutoOffsetRule);
+    }
+  }, [autoOffsetStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(autoOffsetStorageKey, JSON.stringify(autoOffsetRule));
+  }, [autoOffsetRule, autoOffsetStorageKey]);
 
   const loadProjects = useCallback(async () => {
     try {
@@ -226,6 +327,74 @@ export function MarketplacePage() {
     }
   }, [canManageListings, statusFilter, searchTerm, categoryFilter, sortFilter]);
 
+  const loadRecommendedProjects = useCallback(async () => {
+    try {
+      const params = new URLSearchParams({
+        pageSize: "8",
+        sort: "rating_desc",
+      });
+
+      if (canManageListings) {
+        params.set("includeAllStatuses", "true");
+      } else {
+        params.set("includeSoldOut", "true");
+      }
+
+      const response = await marketplaceService.getProjects(`?${params.toString()}`);
+      const recommendations = response.data
+        .filter((project) => project.status === "PUBLISHED" || project.status === "SOLD_OUT")
+        .slice(0, 2)
+        .map((project) => ({
+          id: project.id,
+          name: project.name,
+          type: project.type,
+          location: project.location || "Global",
+          pricePerTonUsd: project.pricePerTonUsd ?? project.pricePerCreditUsd,
+          rating: project.rating,
+          registry: project.registry || project.verificationStandard || project.certification || null,
+        } satisfies MarketplaceRecommendation));
+
+      setRecommendedProjects(recommendations);
+    } catch {
+      setRecommendedProjects([]);
+    }
+  }, [canManageListings]);
+
+  const loadShipmentBurnRate = useCallback(async () => {
+    try {
+      const response = await shipmentService.getShipments("?pageSize=100&sort=latest");
+      const shipments = Array.isArray(response.data) ? response.data : [];
+
+      if (!shipments.length) {
+        setProjectedMonthlyShipmentBurnUsd(0);
+        return;
+      }
+
+      const nowTime = Date.now();
+      const lookbackWindowMs = SHIPMENT_BURN_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+      const recentShipments = shipments.filter((shipment) => {
+        const shipmentDate = shipment.shipmentDate || shipment.createdAt;
+        const shipmentTime = new Date(shipmentDate).getTime();
+        return Number.isFinite(shipmentTime) && (nowTime - shipmentTime) <= lookbackWindowMs;
+      });
+      const sourceShipments = recentShipments.length > 0 ? recentShipments : shipments;
+      const sourceWindowMonths = recentShipments.length > 0
+        ? SHIPMENT_BURN_LOOKBACK_DAYS / 30
+        : 1;
+      const totalSourceOffsetCost = sourceShipments.reduce(
+        (sum, shipment) => sum + resolveShipmentOffsetCost(shipment),
+        0,
+      );
+      const monthlyBurn = sourceWindowMonths > 0
+        ? totalSourceOffsetCost / sourceWindowMonths
+        : 0;
+
+      setProjectedMonthlyShipmentBurnUsd(Number(Math.max(monthlyBurn, 0).toFixed(2)));
+    } catch {
+      setProjectedMonthlyShipmentBurnUsd(0);
+    }
+  }, []);
+
   useEffect(() => {
     void loadProjects();
     const unsubscribers = [
@@ -242,12 +411,85 @@ export function MarketplacePage() {
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, [loadProjects]);
 
+  useEffect(() => {
+    if (loading || projects.length > 0) {
+      return;
+    }
+
+    void loadRecommendedProjects();
+  }, [loadRecommendedProjects, loading, projects.length]);
+
+  useEffect(() => {
+    void loadShipmentBurnRate();
+    const unsubscribers = [
+      socketService.on("shipmentCreated", () => {
+        void loadShipmentBurnRate();
+      }),
+      socketService.on("shipmentUpdated", () => {
+        void loadShipmentBurnRate();
+      }),
+      socketService.on("shipmentDeleted", () => {
+        void loadShipmentBurnRate();
+      }),
+    ];
+
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, [loadShipmentBurnRate]);
+
+  useEffect(() => {
+    const raw = sessionStorage.getItem(BATCH_OFFSET_SELECTION_STORAGE_KEY);
+    if (!raw) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as { shipmentIds?: string[]; totalEmissionsTonnes?: number };
+      const shipmentIds = Array.isArray(parsed.shipmentIds)
+        ? Array.from(new Set(parsed.shipmentIds.map((id) => String(id || "").trim()).filter(Boolean)))
+        : [];
+      const totalEmissionsTonnes = Number(parsed.totalEmissionsTonnes || 0);
+
+      if (shipmentIds.length) {
+        setCheckoutForm((current) => ({
+          ...current,
+          shipmentIds,
+          quantity: totalEmissionsTonnes > 0 ? Number(totalEmissionsTonnes.toFixed(2)) : current.quantity,
+        }));
+
+        showToast({
+          tone: "success",
+          title: "Batch shipment selection loaded",
+          description: `${shipmentIds.length} shipment(s) linked for this checkout.`,
+        });
+      }
+    } catch {
+      // Ignore malformed session payload and continue with defaults.
+    } finally {
+      sessionStorage.removeItem(BATCH_OFFSET_SELECTION_STORAGE_KEY);
+    }
+  }, [showToast]);
+
+  const completedTransactions = useMemo(
+    () => transactions.filter((transaction) => transaction.status === "COMPLETED"),
+    [transactions],
+  );
+
+  const pendingTransactions = useMemo(
+    () => transactions.filter((transaction) => transaction.status === "PENDING"),
+    [transactions],
+  );
+
   const metrics = useMemo(() => ({
-    retiredCredits: transactions.reduce((sum, transaction) => sum + transaction.quantity, 0),
+    retiredCredits: completedTransactions.reduce((sum, transaction) => sum + transaction.quantity, 0),
     publishedProjects: projects.filter((project) => project.status === "PUBLISHED").length,
     remainingCredits: projects.reduce((sum, project) => sum + getProjectAvailableInventory(project), 0),
-    offsetSpendUsd: transactions.reduce((sum, transaction) => sum + transaction.totalCostUsd, 0),
-  }), [projects, transactions]);
+    offsetSpendUsd: completedTransactions.reduce((sum, transaction) => sum + transaction.totalCostUsd, 0),
+  }), [completedTransactions, projects]);
+
+  const pendingTransactionsUsd = useMemo(
+    () => pendingTransactions.reduce((sum, transaction) => sum + Number(transaction.totalCostUsd || 0), 0),
+    [pendingTransactions],
+  );
 
   const liveInventoryValueUsd = useMemo(
     () => projects
@@ -259,6 +501,16 @@ export function MarketplacePage() {
   const carbonBudgetUsd = useMemo(
     () => Math.max(metrics.offsetSpendUsd + (liveInventoryValueUsd * 0.35), 25000),
     [liveInventoryValueUsd, metrics.offsetSpendUsd],
+  );
+
+  const remainingBudgetUsd = useMemo(
+    () => Math.max(carbonBudgetUsd - metrics.offsetSpendUsd, 0),
+    [carbonBudgetUsd, metrics.offsetSpendUsd],
+  );
+
+  const availableBudgetUsd = useMemo(
+    () => Math.max(remainingBudgetUsd - pendingTransactionsUsd, 0),
+    [pendingTransactionsUsd, remainingBudgetUsd],
   );
 
   const checkoutBlockedReason = useMemo(() => {
@@ -296,6 +548,120 @@ export function MarketplacePage() {
     setCategoryFilter("ALL");
     setSortFilter("latest");
     setStatusFilter("ALL");
+  };
+
+  const activeFilters = useMemo<MarketplaceActiveFilter[]>(() => {
+    const filters: MarketplaceActiveFilter[] = [];
+
+    if (searchTerm.trim()) {
+      filters.push({
+        key: "search",
+        label: "Search",
+        value: searchTerm.trim(),
+      });
+    }
+
+    if (categoryFilter !== "ALL") {
+      filters.push({
+        key: "category",
+        label: "Category",
+        value: categoryFilter,
+      });
+    }
+
+    if (sortFilter !== "latest") {
+      filters.push({
+        key: "sort",
+        label: "Sort",
+        value: SORT_FILTER_LABELS[sortFilter],
+      });
+    }
+
+    if (canManageListings && statusFilter !== "ALL") {
+      filters.push({
+        key: "status",
+        label: "Lifecycle",
+        value: STATUS_FILTER_LABELS[statusFilter],
+      });
+    }
+
+    return filters;
+  }, [canManageListings, categoryFilter, searchTerm, sortFilter, statusFilter]);
+
+  const removeActiveFilter = (filterKey: string) => {
+    if (filterKey === "search") {
+      setSearchTerm("");
+      return;
+    }
+
+    if (filterKey === "category") {
+      setCategoryFilter("ALL");
+      return;
+    }
+
+    if (filterKey === "sort") {
+      setSortFilter("latest");
+      return;
+    }
+
+    if (filterKey === "status") {
+      setStatusFilter("ALL");
+    }
+  };
+
+  const requestCustomCreditSourcing = () => {
+    showToast({
+      tone: "info",
+      title: "Custom sourcing request started",
+      description: "Our sourcing team has been notified to find credits aligned with your route requirements.",
+    });
+  };
+
+  const emptyStateRecommendations = useMemo(() => {
+    if (recommendedProjects.length >= 2) {
+      return recommendedProjects.slice(0, 2);
+    }
+
+    const remaining = 2 - recommendedProjects.length;
+    return [
+      ...recommendedProjects,
+      ...FALLBACK_RECOMMENDATIONS.slice(0, remaining),
+    ];
+  }, [recommendedProjects]);
+
+  const requestBudgetIncrease = async () => {
+    const requestedBudgetUsd = Math.max(
+      Math.ceil((carbonBudgetUsd * 1.25) / 500) * 500,
+      Math.ceil((carbonBudgetUsd + 1000) / 500) * 500,
+    );
+
+    try {
+      setRequestingBudgetIncrease(true);
+      const response = await marketplaceService.requestBudgetIncrease({
+        currentBudgetUsd: Number(carbonBudgetUsd.toFixed(2)),
+        requestedBudgetUsd: Number(requestedBudgetUsd.toFixed(2)),
+        remainingBudgetUsd: Number(availableBudgetUsd.toFixed(2)),
+        pendingTransactionsUsd: Number(pendingTransactionsUsd.toFixed(2)),
+      });
+
+      showToast({
+        tone: response.emailDelivered ? "success" : "info",
+        title: response.emailDelivered
+          ? "Budget increase request sent"
+          : "Budget request logged",
+        description: response.emailDelivered
+          ? `Notified ${response.recipientCount} admin recipient(s) for approval.`
+          : "SMTP is not configured, so the request was logged without email delivery.",
+      });
+    } catch (err) {
+      showToast({
+        tone: "error",
+        title: "Could not request budget increase",
+        description: err instanceof Error ? err.message : "Unknown error",
+      });
+    } finally {
+      setRequestingBudgetIncrease(false);
+    }
   };
 
   const openCreateProjectModal = () => {
@@ -473,7 +839,8 @@ export function MarketplacePage() {
       const reservation = await creditsService.startCheckout({
         companyName: checkoutForm.companyName.trim(),
         projectId: selectedProject.id,
-        shipmentId: checkoutForm.shipmentId,
+        shipmentId: checkoutForm.shipmentIds[0] || null,
+        shipmentIds: checkoutForm.shipmentIds,
         quantity: checkoutForm.quantity,
         idempotencyKey: crypto.randomUUID(),
       });
@@ -540,9 +907,11 @@ export function MarketplacePage() {
     }
   };
 
-  const checkoutShipmentLabel = checkoutForm.shipmentId
-    ? `Shipment ${checkoutForm.shipmentId.slice(0, 8)}`
-    : null;
+  const checkoutShipmentLabel = checkoutForm.shipmentIds.length === 0
+    ? null
+    : checkoutForm.shipmentIds.length === 1
+      ? `Shipment ${checkoutForm.shipmentIds[0].slice(0, 8)}`
+      : `${checkoutForm.shipmentIds.length} shipments linked`;
 
   return (
     <div className="space-y-6">
@@ -570,7 +939,13 @@ export function MarketplacePage() {
       <CarbonBudgetWidget
         budgetUsd={carbonBudgetUsd}
         spentUsd={metrics.offsetSpendUsd}
+        pendingTransactionsUsd={pendingTransactionsUsd}
         liveInventoryValueUsd={liveInventoryValueUsd}
+        projectedMonthlySpendUsd={projectedMonthlyShipmentBurnUsd}
+        autoOffsetRule={autoOffsetRule}
+        requestingBudgetIncrease={requestingBudgetIncrease}
+        onAutoOffsetRuleChange={setAutoOffsetRule}
+        onRequestBudgetIncrease={requestBudgetIncrease}
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -613,7 +988,7 @@ export function MarketplacePage() {
         <CheckoutDetails
           companyName={checkoutForm.companyName}
           quantity={checkoutForm.quantity}
-          shipmentId={checkoutForm.shipmentId}
+          shipmentIds={checkoutForm.shipmentIds}
           availableInventory={availableInventory}
           blockedReason={checkoutBlockedReason}
           validationError={checkoutValidation.error}
@@ -621,7 +996,7 @@ export function MarketplacePage() {
           disabled={!selectedProject || !checkoutForm.companyName.trim() || checkoutValidation.isCheckoutDisabled || Boolean(checkoutBlockedReason)}
           onCompanyNameChange={(value) => setCheckoutForm((prev) => ({ ...prev, companyName: value }))}
           onQuantityChange={(value) => setCheckoutForm((prev) => ({ ...prev, quantity: value }))}
-          onShipmentChange={(value) => setCheckoutForm((prev) => ({ ...prev, shipmentId: value }))}
+          onShipmentIdsChange={(value) => setCheckoutForm((prev) => ({ ...prev, shipmentIds: value }))}
           onSubmit={submitCheckout}
         />
 
@@ -650,7 +1025,13 @@ export function MarketplacePage() {
       {loading ? (
         <div className="text-sm text-muted-foreground">Loading marketplace...</div>
       ) : projects.length === 0 ? (
-        <MarketplaceEmptyState onReset={resetFilters} />
+        <MarketplaceEmptyState
+          activeFilters={activeFilters}
+          recommendations={emptyStateRecommendations}
+          onRemoveFilter={removeActiveFilter}
+          onRequestCustomSourcing={requestCustomCreditSourcing}
+          onReset={resetFilters}
+        />
       ) : (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
           {projects.map((project) => (
@@ -718,7 +1099,11 @@ export function MarketplacePage() {
                       <div className="text-xs text-muted-foreground">{transaction.registry}</div>
                     </td>
                     <td className="px-6 py-4 font-mono text-xs">{resolveTransactionReference(transaction)}</td>
-                    <td className="px-6 py-4">{transaction.shipmentReference || "Not linked"}</td>
+                    <td className="px-6 py-4">
+                      {(transaction.shipmentReferences && transaction.shipmentReferences.length > 0)
+                        ? transaction.shipmentReferences.join(", ")
+                        : transaction.shipmentReference || "Not linked"}
+                    </td>
                     <td className="px-6 py-4">{transaction.status}</td>
                     <td className="px-6 py-4">${(transaction.platformFeeUsd || 0).toLocaleString()}</td>
                     <td className="px-6 py-4">${transaction.totalCostUsd.toLocaleString()}</td>
@@ -787,7 +1172,12 @@ export function MarketplacePage() {
             <SuccessRow label="Registry" value={activeTransaction?.registry || "-"} />
             <SuccessRow label="Quantity" value={`${activeTransaction?.quantity || 0} tCO2e`} />
             <SuccessRow label="Platform Fee" value={`$${(activeTransaction?.platformFeeUsd || 0).toLocaleString()}`} />
-            <SuccessRow label="Linked Shipment" value={activeTransaction?.shipmentReference || "Not linked"} />
+            <SuccessRow
+              label="Linked Shipment(s)"
+              value={(activeTransaction?.shipmentReferences && activeTransaction.shipmentReferences.length > 0)
+                ? activeTransaction.shipmentReferences.join(", ")
+                : activeTransaction?.shipmentReference || "Not linked"}
+            />
             <SuccessRow label="Payment Reference" value={activeTransaction?.paymentReference || "-"} />
           </div>
           <div className="flex flex-wrap gap-3">

@@ -8,6 +8,34 @@ function calculateCarbonCost(emissionsTonnes, carbonPricePerTon = 55) {
   return round(Number(emissionsTonnes || 0) * Number(carbonPricePerTon || 55), 2);
 }
 
+function roundMoney(value) {
+  return Number(Number(value || 0).toFixed(2));
+}
+
+function roundTonnes(value) {
+  return Number(Number(value || 0).toFixed(4));
+}
+
+function normalizeLinkedShipmentIds(transaction = {}) {
+  const ids = [];
+
+  if (Array.isArray(transaction.shipmentIds)) {
+    ids.push(...transaction.shipmentIds);
+  }
+
+  if (transaction.shipmentId) {
+    ids.push(transaction.shipmentId);
+  }
+
+  return Array.from(new Set(
+    ids.map((id) => String(id || "").trim()).filter(Boolean),
+  ));
+}
+
+function withSession(query, session) {
+  return session ? query.session(session) : query;
+}
+
 function buildMonthWindow(count = 6) {
   const months = [];
   const cursor = new Date();
@@ -29,6 +57,110 @@ function buildMonthWindow(count = 6) {
 }
 
 class LedgerService extends BaseService {
+  static async linkOffsetTransactionToShipments(transaction, companyId, actor = null, options = {}) {
+    const linkedShipmentIds = normalizeLinkedShipmentIds(transaction);
+    if (!linkedShipmentIds.length) {
+      return [];
+    }
+
+    const session = options.session || null;
+    const transactionId = String(transaction.id || transaction._id || "").trim();
+    const entryDate = new Date(transaction.completedAt || transaction.retiredAt || transaction.createdAt || new Date())
+      .toISOString()
+      .slice(0, 10);
+
+    const existingEntries = await withSession(
+      LedgerEntry.find({
+        companyId,
+        transactionId,
+        category: "OFFSET",
+      }).select("_id"),
+      session,
+    );
+
+    if (existingEntries.length > 0) {
+      return existingEntries;
+    }
+
+    const shipments = await withSession(
+      Shipment.find({
+        _id: { $in: linkedShipmentIds },
+        companyId,
+      }).select("_id reference emissionsTonnes"),
+      session,
+    );
+
+    if (!shipments.length) {
+      return [];
+    }
+
+    const shipmentMap = new Map(shipments.map((shipment) => [String(shipment.id || shipment._id), shipment]));
+    const orderedShipments = linkedShipmentIds
+      .map((shipmentId) => shipmentMap.get(shipmentId))
+      .filter(Boolean);
+
+    if (!orderedShipments.length) {
+      return [];
+    }
+
+    const totalRetiredCredits = roundTonnes(Number(transaction.credits || transaction.quantity || 0));
+    const totalOffsetSpendUsd = roundMoney(Number(transaction.totalCostUsd || transaction.totalCost || transaction.total || 0));
+    const totalShipmentEmissions = orderedShipments.reduce((sum, shipment) => (
+      sum + Math.max(Number(shipment.emissionsTonnes || 0), 0)
+    ), 0);
+
+    let creditsAllocated = 0;
+    let spendAllocated = 0;
+    const entries = orderedShipments.map((shipment, index) => {
+      const isLastShipment = index === orderedShipments.length - 1;
+      const weightingBase = totalShipmentEmissions > 0
+        ? Math.max(Number(shipment.emissionsTonnes || 0), 0) / totalShipmentEmissions
+        : 1 / orderedShipments.length;
+
+      const allocatedCredits = isLastShipment
+        ? roundTonnes(Math.max(totalRetiredCredits - creditsAllocated, 0))
+        : roundTonnes(totalRetiredCredits * weightingBase);
+
+      const allocatedSpendUsd = isLastShipment
+        ? roundMoney(Math.max(totalOffsetSpendUsd - spendAllocated, 0))
+        : roundMoney(totalOffsetSpendUsd * weightingBase);
+
+      creditsAllocated = roundTonnes(creditsAllocated + allocatedCredits);
+      spendAllocated = roundMoney(spendAllocated + allocatedSpendUsd);
+
+      const shipmentId = String(shipment.id || shipment._id);
+      const shipmentReference = shipment.reference || shipmentId.slice(0, 8);
+
+      return {
+        companyId,
+        shipmentId,
+        transactionId,
+        entryDate,
+        category: "OFFSET",
+        description: `Offset allocation from transaction ${transaction.serialNumber || transactionId.slice(0, 8)} for shipment ${shipmentReference}`,
+        logisticsCostUsd: 0,
+        emissionsTonnes: allocatedCredits,
+        carbonTaxUsd: 0,
+        carbonCostUsd: allocatedSpendUsd,
+        totalCostUsd: allocatedSpendUsd,
+        metadata: {
+          source: "BATCH_OFFSET_LINK",
+          allocationMethod: totalShipmentEmissions > 0 ? "EMISSIONS_WEIGHTED" : "EQUAL_SPLIT",
+          shipmentShareRatio: Number(weightingBase.toFixed(6)),
+          linkedShipmentCount: orderedShipments.length,
+          projectId: transaction.projectId || null,
+          projectName: transaction.projectName || null,
+          registry: transaction.registry || null,
+          paymentReference: transaction.paymentReference || null,
+          linkedBy: actor?.id || null,
+          linkedAt: new Date().toISOString(),
+        },
+      };
+    });
+
+    return LedgerEntry.insertMany(entries, session ? { session, ordered: true } : { ordered: true });
+  }
+
   static async list(query = {}, companyId) {
     const filter = {
       companyId,

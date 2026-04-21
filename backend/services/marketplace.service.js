@@ -1,7 +1,9 @@
 const crypto = require("crypto");
-const { CarbonProject, Transaction } = require("../models");
+const { CarbonProject, Company, Transaction, User } = require("../models");
+const env = require("../config/env");
 const BaseService = require("./base.service");
 const AuditService = require("./audit.service");
+const { sendBudgetIncreaseRequestEmail } = require("./emailService");
 const ApiError = require("../utils/ApiError");
 const cache = require("../utils/cache");
 const CheckoutLockService = require("./checkoutLock.service");
@@ -21,6 +23,7 @@ const PROJECT_STATUS_FILTER_MAP = {
 };
 const PUBLIC_MARKETPLACE_STATUSES = ["PUBLISHED"];
 const PUBLIC_MARKETPLACE_WITH_SOLD_OUT_STATUSES = ["PUBLISHED", "SOLD_OUT"];
+const BUDGET_ADMIN_ROLES = ["ADMIN", "SUPERADMIN"];
 
 function isTruthyQueryFlag(value) {
   return value === true || value === "true" || value === 1 || value === "1";
@@ -68,6 +71,15 @@ function ensureFiniteNumber(value, fieldName, { min = Number.NEGATIVE_INFINITY, 
   }
 
   return normalized;
+}
+
+function roundMoney(value) {
+  const normalized = Number(value);
+  if (!Number.isFinite(normalized)) {
+    return 0;
+  }
+
+  return Number(normalized.toFixed(2));
 }
 
 function normalizeOptionalNumber(value, fallbackValue = null, fieldName, { min = Number.NEGATIVE_INFINITY, max = Number.POSITIVE_INFINITY } = {}) {
@@ -570,39 +582,130 @@ class MarketplaceService extends BaseService {
 
     const [projects, transactions] = await Promise.all([
       this.buildListResult(CarbonProject, { query, filter, sort }),
-      Transaction.find({ companyId, status: "COMPLETED" }).sort({ retiredAt: -1 }).limit(20).lean(),
+      Transaction.find({ companyId, status: { $in: ["COMPLETED", "PENDING"] } }).sort({ createdAt: -1 }).limit(50).lean(),
     ]);
 
     const projectIds = projects.data.map((project) => project.id || project._id);
     const lifecycleUsageMap = await this.getLifecycleUsageMap(projectIds, companyId);
 
+    const normalizedTransactions = transactions.map((transaction) => ({
+      id: transaction.id || transaction._id,
+      ...transaction,
+      companyName: transaction.companyName || null,
+      projectName: transaction.projectName || transaction.metadata?.projectName || transaction.projectId || "Offset project",
+      registry: transaction.registry || transaction.metadata?.verificationStandard || null,
+      registryRecordId: transaction.registryRecordId || null,
+      blockchainHash: transaction.blockchainHash || null,
+      vintageYear: Number(transaction.vintageYear || 0),
+      pricePerTon: Number(transaction.pricePerTon || transaction.pricePerTonUsd || transaction.price || 0),
+      quantity: Number(transaction.quantity || transaction.credits || 0),
+      subtotalUsd: Number(transaction.subtotalUsd || (transaction.quantity || transaction.credits || 0) * (transaction.pricePerTon || transaction.pricePerTonUsd || transaction.price || 0)),
+      platformFeeUsd: Number(transaction.platformFeeUsd || 0),
+      shipmentId: transaction.shipmentId || null,
+      shipmentReference: transaction.shipmentReference || null,
+      shipmentStatus: transaction.shipmentStatus || null,
+      totalCost: Number(transaction.totalCost || transaction.totalCostUsd || transaction.total || 0),
+      tCO2eRetired: Number(transaction.tCO2eRetired || transaction.credits || 0),
+      totalCostUsd: Number(transaction.totalCostUsd || transaction.total || 0),
+    }));
+    const completedTransactions = normalizedTransactions.filter((transaction) => transaction.status === "COMPLETED");
+
     return {
       ...projects,
       data: projects.data.map((project) => serializeProject(project, buildLifecycle(project, lifecycleUsageMap.get(project.id || project._id)))),
-      transactions: transactions.map((transaction) => ({
-        id: transaction.id || transaction._id,
-        ...transaction,
-        companyName: transaction.companyName || null,
-        projectName: transaction.projectName || transaction.metadata?.projectName || transaction.projectId || "Offset project",
-        registry: transaction.registry || transaction.metadata?.verificationStandard || null,
-        registryRecordId: transaction.registryRecordId || null,
-        blockchainHash: transaction.blockchainHash || null,
-        vintageYear: Number(transaction.vintageYear || 0),
-        pricePerTon: Number(transaction.pricePerTon || transaction.pricePerTonUsd || transaction.price || 0),
-        quantity: Number(transaction.quantity || transaction.credits || 0),
-        subtotalUsd: Number(transaction.subtotalUsd || (transaction.quantity || transaction.credits || 0) * (transaction.pricePerTon || transaction.pricePerTonUsd || transaction.price || 0)),
-        platformFeeUsd: Number(transaction.platformFeeUsd || 0),
-        shipmentId: transaction.shipmentId || null,
-        shipmentReference: transaction.shipmentReference || null,
-        shipmentStatus: transaction.shipmentStatus || null,
-        totalCost: Number(transaction.totalCost || transaction.totalCostUsd || transaction.total || 0),
-        tCO2eRetired: Number(transaction.tCO2eRetired || transaction.credits || 0),
-        totalCostUsd: Number(transaction.totalCostUsd || transaction.total || 0),
-      })),
+      transactions: normalizedTransactions,
       summary: {
-        totalCreditsRetired: transactions.reduce((sum, transaction) => sum + Number(transaction.credits || 0), 0),
-        totalSpendUsd: transactions.reduce((sum, transaction) => sum + Number(transaction.totalCostUsd || transaction.total || 0), 0),
+        totalCreditsRetired: completedTransactions.reduce((sum, transaction) => sum + Number(transaction.credits || 0), 0),
+        totalSpendUsd: completedTransactions.reduce((sum, transaction) => sum + Number(transaction.totalCostUsd || transaction.total || 0), 0),
       },
+    };
+  }
+
+  static async resolveBudgetRequestRecipients(companyId) {
+    const adminUsers = await User.find({
+      companyId,
+      role: { $in: BUDGET_ADMIN_ROLES },
+      status: { $in: ["ACTIVE", "INVITED"] },
+    })
+      .select("email")
+      .lean();
+
+    const recipients = [...new Set(
+      adminUsers
+        .map((user) => normalizeOptionalText(user.email, null))
+        .filter(Boolean),
+    )];
+
+    if (recipients.length === 0) {
+      const fallbackRecipient = normalizeOptionalText(env.admin.bootstrapEmail, null);
+      if (fallbackRecipient) {
+        recipients.push(fallbackRecipient);
+      }
+    }
+
+    if (recipients.length === 0) {
+      throw new ApiError(409, "No admin recipients are configured for budget increase notifications.");
+    }
+
+    return recipients;
+  }
+
+  static async requestBudgetIncrease(payload = {}, companyId, actor = null, details = {}) {
+    const currentBudgetUsd = roundMoney(ensureFiniteNumber(payload.currentBudgetUsd, "currentBudgetUsd", { min: 0 }));
+    const requestedBudgetUsd = roundMoney(ensureFiniteNumber(payload.requestedBudgetUsd, "requestedBudgetUsd", { min: 0 }));
+    const remainingBudgetUsd = roundMoney(ensureFiniteNumber(payload.remainingBudgetUsd ?? 0, "remainingBudgetUsd", { min: 0 }));
+    const pendingTransactionsUsd = roundMoney(ensureFiniteNumber(payload.pendingTransactionsUsd ?? 0, "pendingTransactionsUsd", { min: 0 }));
+
+    if (requestedBudgetUsd <= currentBudgetUsd) {
+      throw new ApiError(422, "requestedBudgetUsd must be greater than currentBudgetUsd.");
+    }
+
+    const company = await Company.findById(companyId).select("name").lean();
+    const recipients = await this.resolveBudgetRequestRecipients(companyId);
+    const requesterName = normalizeOptionalText(actor?.name, null) || "CarbonFlow User";
+    const requesterEmail = normalizeOptionalText(actor?.email, null) || "noreply@carbonflow.local";
+    const companyName = normalizeOptionalText(payload.companyName, company?.name) || "CarbonFlow Company";
+    const reason = normalizeOptionalText(payload.reason, null);
+
+    const delivery = await sendBudgetIncreaseRequestEmail({
+      to: recipients,
+      requesterName,
+      requesterEmail,
+      companyName,
+      currentBudgetUsd,
+      requestedBudgetUsd,
+      remainingBudgetUsd,
+      pendingTransactionsUsd,
+      reason,
+    });
+
+    await AuditService.log({
+      companyId,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      ipAddress: details.ipAddress || null,
+      action: "offsetBudget.increase_requested",
+      entityType: "MarketplaceBudget",
+      entityId: String(companyId || ""),
+      details: {
+        currentBudgetUsd,
+        requestedBudgetUsd,
+        remainingBudgetUsd,
+        pendingTransactionsUsd,
+        reason,
+        recipientCount: recipients.length,
+        emailDelivered: Boolean(delivery?.messageId),
+      },
+    });
+
+    return {
+      success: true,
+      currentBudgetUsd,
+      requestedBudgetUsd,
+      remainingBudgetUsd,
+      pendingTransactionsUsd,
+      recipientCount: recipients.length,
+      emailDelivered: Boolean(delivery?.messageId),
     };
   }
 

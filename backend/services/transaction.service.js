@@ -9,6 +9,7 @@ const CertificateService = require("./certificate.service");
 const DocumentStorageService = require("./documentStorage.service");
 const CheckoutLockService = require("./checkoutLock.service");
 const MarketplaceService = require("./marketplace.service");
+const LedgerService = require("./ledger.service");
 const { CARBON_CREDITS_CONFIG } = require("../config/carbonCredits");
 
 const CHECKOUT_PLATFORM_FEE_RATE = 0.02;
@@ -23,6 +24,11 @@ function roundMoney(value) {
 }
 
 function buildIdempotencyFingerprint(payload, companyId, actorId) {
+  const shipmentIds = Array.from(new Set([
+    ...(Array.isArray(payload.shipmentIds) ? payload.shipmentIds : []),
+    payload.shipmentId,
+  ].map((shipmentId) => String(shipmentId || "").trim()).filter(Boolean))).sort();
+
   const digest = crypto.createHash("sha256");
   digest.update(JSON.stringify({
     companyId,
@@ -30,6 +36,7 @@ function buildIdempotencyFingerprint(payload, companyId, actorId) {
     companyName: payload.companyName,
     projectId: payload.projectId || null,
     shipmentId: payload.shipmentId || null,
+    shipmentIds,
     quantity: payload.quantity,
   }));
 
@@ -116,8 +123,23 @@ function buildTransactionView(transaction) {
     blockchainHash: record.blockchainHash || null,
     vintageYear: Number(record.vintageYear || 0),
     shipmentId: record.shipmentId || null,
+    shipmentIds: Array.isArray(record.shipmentIds) && record.shipmentIds.length > 0
+      ? record.shipmentIds
+      : record.shipmentId
+        ? [record.shipmentId]
+        : [],
     shipmentReference: record.shipmentReference || null,
+    shipmentReferences: Array.isArray(record.shipmentReferences) && record.shipmentReferences.length > 0
+      ? record.shipmentReferences
+      : record.shipmentReference
+        ? [record.shipmentReference]
+        : [],
     shipmentStatus: record.shipmentStatus || null,
+    shipmentStatuses: Array.isArray(record.shipmentStatuses) && record.shipmentStatuses.length > 0
+      ? record.shipmentStatuses
+      : record.shipmentStatus
+        ? [record.shipmentStatus]
+        : [],
     pricePerTon: Number(record.pricePerTon ?? record.pricePerTonUsd ?? record.price ?? 0),
     pricePerTonUsd: Number(record.pricePerTonUsd ?? record.price ?? 0),
     quantity: Number(record.quantity ?? record.credits ?? 0),
@@ -222,21 +244,48 @@ async function restoreProjectCompletion(transaction, options = {}) {
   );
 }
 
-async function getActiveShipmentOrFail(shipmentId, companyId) {
-  if (!shipmentId) {
-    return null;
+function normalizeLinkedShipmentIds(payload = {}) {
+  const ids = [];
+
+  if (Array.isArray(payload.shipmentIds)) {
+    ids.push(...payload.shipmentIds);
   }
 
-  const shipment = await Shipment.findOne({ _id: shipmentId, companyId });
-  if (!shipment) {
-    throw new ApiError(404, "Linked shipment was not found.");
+  if (payload.shipmentId) {
+    ids.push(payload.shipmentId);
   }
 
-  if (!ACTIVE_SHIPMENT_STATUSES.has(String(shipment.status || "").toUpperCase())) {
+  return Array.from(new Set(
+    ids.map((shipmentId) => String(shipmentId || "").trim()).filter(Boolean),
+  ));
+}
+
+async function getActiveShipmentsOrFail(shipmentIds, companyId) {
+  if (!Array.isArray(shipmentIds) || shipmentIds.length === 0) {
+    return [];
+  }
+
+  const shipments = await Shipment.find({
+    _id: { $in: shipmentIds },
+    companyId,
+  });
+
+  const shipmentMap = new Map(shipments.map((shipment) => [String(shipment.id || shipment._id), shipment]));
+  const orderedShipments = shipmentIds.map((shipmentId) => shipmentMap.get(shipmentId)).filter(Boolean);
+
+  if (orderedShipments.length !== shipmentIds.length) {
+    throw new ApiError(404, "One or more linked shipments were not found.");
+  }
+
+  const inactiveShipment = orderedShipments.find(
+    (shipment) => !ACTIVE_SHIPMENT_STATUSES.has(String(shipment.status || "").toUpperCase()),
+  );
+
+  if (inactiveShipment) {
     throw new ApiError(409, "Only active shipments can be linked to a checkout.");
   }
 
-  return shipment;
+  return orderedShipments;
 }
 
 class TransactionService {
@@ -368,7 +417,9 @@ class TransactionService {
 
     const projectDetails = normalizeProjectDetails(project);
     const pricePerTon = Number(projectDetails?.pricePerTon || 0);
-    const linkedShipment = await getActiveShipmentOrFail(payload.shipmentId || null, companyId);
+    const linkedShipmentIds = normalizeLinkedShipmentIds(payload);
+    const linkedShipments = await getActiveShipmentsOrFail(linkedShipmentIds, companyId);
+    const primaryLinkedShipment = linkedShipments[0] || null;
 
     if (pricePerTon <= 0) {
       throw new ApiError(422, "pricePerTon must be greater than zero.");
@@ -392,9 +443,12 @@ class TransactionService {
       projectName: projectDetails.projectName,
       registry: projectDetails.registry,
       vintageYear: projectDetails.vintageYear,
-      shipmentId: linkedShipment?.id || null,
-      shipmentReference: linkedShipment?.reference || null,
-      shipmentStatus: linkedShipment?.status || null,
+      shipmentId: primaryLinkedShipment?.id || null,
+      shipmentIds: linkedShipments.map((shipment) => shipment.id),
+      shipmentReference: primaryLinkedShipment?.reference || null,
+      shipmentReferences: linkedShipments.map((shipment) => shipment.reference || shipment.id),
+      shipmentStatus: primaryLinkedShipment?.status || null,
+      shipmentStatuses: linkedShipments.map((shipment) => shipment.status),
       price: pricePerTon,
       pricePerTonUsd: pricePerTon,
       pricePerTon,
@@ -424,6 +478,7 @@ class TransactionService {
           lockStatus: "PENDING",
           reservationCreatedAt: new Date(),
           processingStartedAt: null,
+          linkedShipmentCount: linkedShipments.length,
         },
       },
     };
@@ -657,6 +712,13 @@ class TransactionService {
           if (!updatedTransaction) {
             throw new ApiError(409, "Checkout transaction could not be finalized.");
           }
+
+          await LedgerService.linkOffsetTransactionToShipments(
+            updatedTransaction,
+            companyId,
+            actor,
+            { session },
+          );
 
           finalizedLock = await CheckoutLockService.finalizeLock(activeLock.id, companyId, {
             session,

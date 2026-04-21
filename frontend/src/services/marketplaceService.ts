@@ -54,6 +54,25 @@ export interface MarketplaceProjectActionResult {
   project?: CarbonProject;
 }
 
+export interface BudgetIncreaseRequestPayload {
+  currentBudgetUsd: number;
+  requestedBudgetUsd: number;
+  remainingBudgetUsd: number;
+  pendingTransactionsUsd: number;
+  companyName?: string;
+  reason?: string;
+}
+
+export interface BudgetIncreaseRequestResult {
+  success: boolean;
+  currentBudgetUsd: number;
+  requestedBudgetUsd: number;
+  remainingBudgetUsd: number;
+  pendingTransactionsUsd: number;
+  recipientCount: number;
+  emailDelivered: boolean;
+}
+
 export const marketplaceService = {
   getProjects: (params = "") => apiClient.get<MarketplaceOverview>(`/marketplace${params}`),
   createProject: (data: ProjectPayload) => apiClient.post<CarbonProject>("/marketplace", data),
@@ -64,6 +83,9 @@ export const marketplaceService = {
   archiveProject: (id: string) => apiClient.patch<CarbonProject>(`/marketplace/${id}/archive`),
   deactivateProject: (id: string) => apiClient.patch<CarbonProject>(`/marketplace/${id}/deactivate`),
   markProjectSoldOut: (id: string) => apiClient.patch<CarbonProject>(`/marketplace/${id}/sold-out`),
+  requestBudgetIncrease: (data: BudgetIncreaseRequestPayload) => (
+    apiClient.post<BudgetIncreaseRequestResult>("/marketplace/budget/request-increase", data)
+  ),
   buyCredits: (id: string, credits: number) => apiClient.post<CarbonProject>(`/marketplace/${id}/buy`, { credits }),
   deleteProject: (id: string) => apiClient.delete<MarketplaceProjectActionResult>(`/marketplace/${id}`),
 };

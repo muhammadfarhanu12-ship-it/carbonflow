@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { LoaderCircle, ReceiptText, Truck } from "lucide-react";
+import { LoaderCircle, ReceiptText, Search, Truck } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card";
 import { Button } from "@/src/components/ui/button";
 import { shipmentService } from "@/src/services/shipmentService";
@@ -9,7 +9,7 @@ import type { Shipment } from "@/src/types/platform";
 interface CheckoutDetailsProps {
   companyName: string;
   quantity: number;
-  shipmentId: string | null;
+  shipmentIds: string[];
   availableInventory: number;
   blockedReason?: string;
   validationError?: string;
@@ -17,14 +17,14 @@ interface CheckoutDetailsProps {
   disabled?: boolean;
   onCompanyNameChange: (value: string) => void;
   onQuantityChange: (value: number) => void;
-  onShipmentChange: (value: string | null) => void;
+  onShipmentIdsChange: (value: string[]) => void;
   onSubmit: () => void | Promise<void>;
 }
 
 export function CheckoutDetails({
   companyName,
   quantity,
-  shipmentId,
+  shipmentIds,
   availableInventory,
   blockedReason = "",
   validationError = "",
@@ -32,12 +32,13 @@ export function CheckoutDetails({
   disabled = false,
   onCompanyNameChange,
   onQuantityChange,
-  onShipmentChange,
+  onShipmentIdsChange,
   onSubmit,
 }: CheckoutDetailsProps) {
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [loadingShipments, setLoadingShipments] = useState(false);
   const [shipmentError, setShipmentError] = useState("");
+  const [shipmentSearch, setShipmentSearch] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -73,10 +74,33 @@ export function CheckoutDetails({
     };
   }, []);
 
+  const primaryShipmentId = shipmentIds[0] || null;
   const selectedShipment = useMemo(
-    () => shipments.find((shipment) => shipment.id === shipmentId) || null,
-    [shipments, shipmentId],
+    () => shipments.find((shipment) => shipment.id === primaryShipmentId) || null,
+    [shipments, primaryShipmentId],
   );
+
+  const filteredShipments = useMemo(() => {
+    const query = shipmentSearch.trim().toLowerCase();
+    if (!query) {
+      return shipments;
+    }
+
+    return shipments.filter((shipment) => {
+      const candidates = [
+        shipment.reference,
+        shipment.billOfLading,
+        shipment.containerId,
+        shipment.metadata?.billOfLading,
+        shipment.metadata?.bolNumber,
+        shipment.metadata?.bol,
+        shipment.metadata?.containerId,
+        shipment.metadata?.containerID,
+      ];
+
+      return candidates.some((value) => String(value || "").toLowerCase().includes(query));
+    });
+  }, [shipmentSearch, shipments]);
 
   return (
     <Card>
@@ -120,19 +144,33 @@ export function CheckoutDetails({
             <Truck className="h-4 w-4" />
             Link to Shipment
           </span>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <input
+              className="h-10 w-full rounded-md border border-input bg-background pl-8 pr-3 text-sm"
+              placeholder="Search BOL or Container ID..."
+              value={shipmentSearch}
+              onChange={(event) => setShipmentSearch(event.target.value)}
+            />
+          </div>
           <select
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            value={shipmentId || ""}
-            onChange={(event) => onShipmentChange(event.target.value || null)}
+            value={primaryShipmentId || ""}
+            onChange={(event) => onShipmentIdsChange(event.target.value ? [event.target.value] : [])}
             disabled={loadingShipments}
           >
             <option value="">No linked shipment</option>
-            {shipments.map((shipment) => (
+            {filteredShipments.map((shipment) => (
               <option key={shipment.id} value={shipment.id}>
-                {shipment.reference} | {shipment.status} | {shipment.id.slice(0, 8)}
+                {shipment.reference} | {shipment.status} | {shipment.metadata?.containerId || shipment.containerId || shipment.id.slice(0, 8)}
               </option>
             ))}
           </select>
+          {shipmentIds.length > 1 ? (
+            <span className="text-xs text-muted-foreground">
+              Batch linked shipments: {shipmentIds.length} selected from Shipments view.
+            </span>
+          ) : null}
           {loadingShipments ? <span className="text-xs text-muted-foreground">Loading active shipments...</span> : null}
           {!loadingShipments && selectedShipment ? (
             <span className="text-xs text-muted-foreground">

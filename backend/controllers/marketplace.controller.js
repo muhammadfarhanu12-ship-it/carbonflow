@@ -10,6 +10,13 @@ exports.list = async (req, res) => sendSuccess(res, {
   data: await MarketplaceService.list(req.query, req.user.companyId, req.user),
 });
 
+exports.requestBudgetIncrease = async (req, res) => sendSuccess(res, {
+  message: "Budget increase request sent to company admin",
+  data: await MarketplaceService.requestBudgetIncrease(req.body, req.user.companyId, req.user, {
+    ipAddress: getRequestIp(req),
+  }),
+});
+
 exports.create = async (req, res) => {
   const project = await MarketplaceService.create(req.body, req.user.companyId, req.user);
   req.io.emit("projectCreated", project);

@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
-import { Filter, Loader2, Pencil, Search, Trash2, Truck, Upload } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { CheckSquare, Filter, Loader2, Pencil, Search, Trash2, Truck, Upload } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card";
 import { Button } from "@/src/components/ui/button";
 import { UploadDataModal } from "@/src/components/shared/UploadDataModal";
+import { Modal } from "@/src/components/shared/Modal";
 import { shipmentService, type ShipmentPayload } from "@/src/services/shipmentService";
 import { supplierService } from "@/src/services/supplierService";
 import { socketService } from "@/src/services/socketService";
 import { useToast } from "@/src/components/providers/ToastProvider";
+import { BATCH_OFFSET_SELECTION_STORAGE_KEY } from "@/src/constants/batchOffset";
 import type { Shipment, Supplier } from "@/src/types/platform";
 
 const initialForm: ShipmentPayload = {
@@ -28,6 +30,7 @@ const initialForm: ShipmentPayload = {
 
 export function ShipmentsPage() {
   const { showToast } = useToast();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -37,7 +40,21 @@ export function ShipmentsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showOffsetSummaryModal, setShowOffsetSummaryModal] = useState(false);
+  const [selectedShipmentIds, setSelectedShipmentIds] = useState<string[]>([]);
   const [form, setForm] = useState<ShipmentPayload>(initialForm);
+
+  const selectedShipments = useMemo(() => {
+    const selectedSet = new Set(selectedShipmentIds);
+    return shipments.filter((shipment) => selectedSet.has(shipment.id));
+  }, [shipments, selectedShipmentIds]);
+
+  const totalSelectedEmissionsTonnes = useMemo(
+    () => selectedShipments.reduce((sum, shipment) => sum + Number(shipment.emissionsTonnes || 0), 0),
+    [selectedShipments],
+  );
+
+  const isAllVisibleSelected = shipments.length > 0 && selectedShipments.length === shipments.length;
 
   const loadPage = async (query = search) => {
     try {
@@ -70,6 +87,16 @@ export function ShipmentsPage() {
 
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, [searchParams]);
+
+  useEffect(() => {
+    if (shipments.length === 0) {
+      setSelectedShipmentIds([]);
+      return;
+    }
+
+    const visibleIds = new Set(shipments.map((shipment) => shipment.id));
+    setSelectedShipmentIds((current) => current.filter((id) => visibleIds.has(id)));
+  }, [shipments]);
 
   const resetForm = () => {
     setEditingId(null);
@@ -150,6 +177,49 @@ export function ShipmentsPage() {
     }
   };
 
+  const toggleShipmentSelection = (shipmentId: string) => {
+    setSelectedShipmentIds((current) => (
+      current.includes(shipmentId)
+        ? current.filter((id) => id !== shipmentId)
+        : [...current, shipmentId]
+    ));
+  };
+
+  const toggleSelectAllVisible = () => {
+    if (isAllVisibleSelected) {
+      setSelectedShipmentIds([]);
+      return;
+    }
+
+    setSelectedShipmentIds(shipments.map((shipment) => shipment.id));
+  };
+
+  const clearSelection = () => {
+    setSelectedShipmentIds([]);
+  };
+
+  const continueToBatchOffset = () => {
+    if (!selectedShipments.length) {
+      setShowOffsetSummaryModal(false);
+      return;
+    }
+
+    const payload = {
+      shipmentIds: selectedShipments.map((shipment) => shipment.id),
+      totalEmissionsTonnes: Number(totalSelectedEmissionsTonnes.toFixed(4)),
+      createdAt: new Date().toISOString(),
+    };
+
+    sessionStorage.setItem(BATCH_OFFSET_SELECTION_STORAGE_KEY, JSON.stringify(payload));
+    setShowOffsetSummaryModal(false);
+    navigate("/app/marketplace?batchOffset=true");
+    showToast({
+      tone: "success",
+      title: "Batch offset ready",
+      description: `${selectedShipments.length} shipment(s) were queued for offset checkout.`,
+    });
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -222,6 +292,15 @@ export function ShipmentsPage() {
             <table className="w-full text-left text-sm">
               <thead className="border-b bg-muted/50 text-muted-foreground">
                 <tr>
+                  <th className="px-6 py-3 font-medium">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-border"
+                      checked={isAllVisibleSelected}
+                      onChange={toggleSelectAllVisible}
+                      aria-label="Select all visible shipments"
+                    />
+                  </th>
                   <th className="px-6 py-3 font-medium">Shipment ID</th>
                   <th className="px-6 py-3 font-medium">Route</th>
                   <th className="px-6 py-3 font-medium">Mode</th>
@@ -234,11 +313,20 @@ export function ShipmentsPage() {
               </thead>
               <tbody className="divide-y divide-border">
                 {loading ? (
-                  <tr><td colSpan={8} className="px-6 py-4 text-center text-muted-foreground">Loading shipments...</td></tr>
+                  <tr><td colSpan={9} className="px-6 py-4 text-center text-muted-foreground">Loading shipments...</td></tr>
                 ) : shipments.length === 0 ? (
-                  <tr><td colSpan={8} className="px-6 py-4 text-center text-muted-foreground">No shipments found.</td></tr>
+                  <tr><td colSpan={9} className="px-6 py-4 text-center text-muted-foreground">No shipments found.</td></tr>
                 ) : shipments.map((shipment) => (
                   <tr key={shipment.id} className="hover:bg-muted/50">
+                    <td className="px-6 py-4">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-border"
+                        checked={selectedShipmentIds.includes(shipment.id)}
+                        onChange={() => toggleShipmentSelection(shipment.id)}
+                        aria-label={`Select shipment ${shipment.reference}`}
+                      />
+                    </td>
                     <td className="px-6 py-4 font-medium text-foreground">{shipment.reference}</td>
                     <td className="px-6 py-4">{shipment.origin} to {shipment.destination}</td>
                     <td className="px-6 py-4">{shipment.transportMode}</td>
@@ -263,6 +351,74 @@ export function ShipmentsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {selectedShipmentIds.length > 0 ? (
+        <div className="fixed bottom-6 right-6 z-40 w-full max-w-sm rounded-xl border border-primary/20 bg-background/95 p-4 shadow-2xl backdrop-blur supports-[backdrop-filter]:bg-background/80">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">
+                {selectedShipmentIds.length} shipment(s) selected
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Total emissions: {totalSelectedEmissionsTonnes.toFixed(2)} tCO2e
+              </p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={clearSelection}>
+              Clear
+            </Button>
+          </div>
+          <Button className="mt-3 w-full" onClick={() => setShowOffsetSummaryModal(true)}>
+            <CheckSquare className="mr-2 h-4 w-4" />
+            Offset Selected
+          </Button>
+        </div>
+      ) : null}
+
+      <Modal
+        open={showOffsetSummaryModal}
+        onClose={() => setShowOffsetSummaryModal(false)}
+        title="Batch Offset Summary"
+        description="Review selected shipments before opening marketplace checkout."
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
+              <div className="text-xs text-muted-foreground">Selected Shipments</div>
+              <div className="text-lg font-semibold text-foreground">{selectedShipments.length}</div>
+            </div>
+            <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
+              <div className="text-xs text-muted-foreground">Total tCO2e</div>
+              <div className="text-lg font-semibold text-foreground">{totalSelectedEmissionsTonnes.toFixed(2)}</div>
+            </div>
+          </div>
+
+          <div className="max-h-64 overflow-auto rounded-lg border border-border">
+            <table className="w-full text-left text-sm">
+              <thead className="sticky top-0 bg-muted/50 text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Shipment</th>
+                  <th className="px-3 py-2 font-medium">Route</th>
+                  <th className="px-3 py-2 font-medium text-right">tCO2e</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {selectedShipments.map((shipment) => (
+                  <tr key={shipment.id}>
+                    <td className="px-3 py-2">{shipment.reference}</td>
+                    <td className="px-3 py-2">{shipment.origin} to {shipment.destination}</td>
+                    <td className="px-3 py-2 text-right font-medium">{shipment.emissionsTonnes.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowOffsetSummaryModal(false)}>Close</Button>
+            <Button onClick={continueToBatchOffset}>Continue to Marketplace</Button>
+          </div>
+        </div>
+      </Modal>
 
       <UploadDataModal
         open={showImportModal}

@@ -1,5 +1,13 @@
 const { sendEmail } = require("../utils/mailer");
 
+function formatCurrency(value) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(Number(value) || 0);
+}
+
 function buildResetPasswordTemplate({ name, fullName, resetUrl }) {
   return {
     subject: "Reset your password",
@@ -35,6 +43,38 @@ function buildWelcomeTemplate({ name, fullName }) {
   };
 }
 
+function buildBudgetIncreaseTemplate({
+  requesterName,
+  requesterEmail,
+  companyName,
+  currentBudgetUsd,
+  requestedBudgetUsd,
+  remainingBudgetUsd,
+  pendingTransactionsUsd,
+  reason,
+}) {
+  const hasReason = String(reason || "").trim().length > 0;
+
+  return {
+    subject: `Budget increase request from ${companyName}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827;">
+        <h2>Marketplace Budget Increase Request</h2>
+        <p><strong>Company:</strong> ${companyName}</p>
+        <p><strong>Requested by:</strong> ${requesterName} (${requesterEmail})</p>
+        <div style="margin: 16px 0; padding: 12px; border: 1px solid #d1fae5; border-radius: 10px; background: #ecfdf5;">
+          <p style="margin: 0 0 8px;"><strong>Current Budget:</strong> ${formatCurrency(currentBudgetUsd)}</p>
+          <p style="margin: 0 0 8px;"><strong>Requested Budget:</strong> ${formatCurrency(requestedBudgetUsd)}</p>
+          <p style="margin: 0 0 8px;"><strong>Remaining Budget:</strong> ${formatCurrency(remainingBudgetUsd)}</p>
+          <p style="margin: 0;"><strong>Pending Transactions:</strong> ${formatCurrency(pendingTransactionsUsd)}</p>
+        </div>
+        ${hasReason ? `<p><strong>Reason:</strong> ${String(reason).trim()}</p>` : ""}
+        <p>Review this request in the admin panel and update the budget policy as needed.</p>
+      </div>
+    `,
+  };
+}
+
 async function sendResetPasswordEmail({ to, name, fullName, resetUrl }) {
   const template = buildResetPasswordTemplate({ name, fullName, resetUrl });
 
@@ -55,7 +95,18 @@ async function sendWelcomeEmail({ to, name, fullName }) {
   });
 }
 
+async function sendBudgetIncreaseRequestEmail(payload) {
+  const template = buildBudgetIncreaseTemplate(payload);
+
+  return sendEmail({
+    to: payload.to,
+    subject: template.subject,
+    html: template.html,
+  });
+}
+
 module.exports = {
   sendResetPasswordEmail,
   sendWelcomeEmail,
+  sendBudgetIncreaseRequestEmail,
 };

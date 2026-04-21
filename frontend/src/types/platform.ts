@@ -6,6 +6,14 @@ export type VerificationStatus = "VERIFIED" | "PENDING" | "ACTION_REQUIRED";
 export type ShipmentStatus = "PLANNED" | "IN_TRANSIT" | "DELAYED" | "DELIVERED";
 export type TransportMode = "ROAD" | "RAIL" | "AIR" | "OCEAN";
 export type MarketplaceListingStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED" | "SOLD_OUT";
+export type CarbonRegistry = "VERRA" | "GOLD_STANDARD" | "PURO_EARTH";
+export type ProjectVerificationStatus = "VERIFIED" | "PENDING" | "ACTION_REQUIRED";
+export type ProjectSdgGoal =
+  | "SDG_6_CLEAN_WATER"
+  | "SDG_7_AFFORDABLE_CLEAN_ENERGY"
+  | "SDG_13_CLIMATE_ACTION"
+  | "SDG_14_LIFE_BELOW_WATER"
+  | "SDG_15_LIFE_ON_LAND";
 
 export interface PaginationMeta {
   page: number;
@@ -124,6 +132,8 @@ export interface Shipment {
   organizationId?: string;
   supplierId: string;
   reference: string;
+  billOfLading?: string | null;
+  containerId?: string | null;
   origin: string;
   destination: string;
   distanceKm: number;
@@ -140,6 +150,14 @@ export interface Shipment {
   shipmentDate: string;
   distanceSource?: "MANUAL" | "ESTIMATED";
   notes?: string | null;
+  metadata?: {
+    billOfLading?: string | null;
+    bolNumber?: string | null;
+    bol?: string | null;
+    containerId?: string | null;
+    containerID?: string | null;
+    [key: string]: unknown;
+  };
   createdAt: string;
   supplier?: Supplier;
 }
@@ -230,6 +248,16 @@ export interface CarbonProject {
   availableToPurchase: number;
   retiredCredits: number;
   status: MarketplaceListingStatus;
+  verificationDetails?: {
+    registries: CarbonRegistry[];
+    verificationStatus: ProjectVerificationStatus;
+    registryProjectId?: string | null;
+    verifiedBy?: string | null;
+    verificationDate?: string | null;
+    methodology?: string | null;
+    vintageYear: number;
+    sdgGoals: ProjectSdgGoal[];
+  } | null;
   lifecycle?: {
     hasTransactionHistory: boolean;
     transactionCount: number;
@@ -259,8 +287,11 @@ export interface CarbonCreditTransaction {
   blockchainHash?: string | null;
   vintageYear: number;
   shipmentId?: string | null;
+  shipmentIds?: string[];
   shipmentReference?: string | null;
+  shipmentReferences?: string[];
   shipmentStatus?: Shipment["status"] | null;
+  shipmentStatuses?: Array<Shipment["status"]>;
   pricePerTon: number;
   pricePerTonUsd: number;
   quantity: number;
@@ -303,6 +334,7 @@ export interface CreditCheckoutPayload {
   companyName: string;
   projectId: string;
   shipmentId?: string | null;
+  shipmentIds?: string[];
   quantity: number;
   idempotencyKey?: string | null;
 }
