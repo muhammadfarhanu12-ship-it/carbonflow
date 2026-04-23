@@ -32,13 +32,42 @@ const optimizationRoutes = require("./routes/optimization.routes");
 const aiRoutes = require("./routes/ai.routes.ts");
 const CheckoutLockService = require("./services/checkoutLock.service");
 
+function normalizeOrigin(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  try {
+    return new URL(normalized).origin;
+  } catch {
+    return normalized.replace(/\/+$/, "");
+  }
+}
+
 function buildCorsOriginValidator(allowedOrigins) {
   if (!Array.isArray(allowedOrigins) || allowedOrigins.length === 0) {
     return true;
   }
 
+  const normalizedAllowedOrigins = [...new Set(
+    allowedOrigins
+      .map((origin) => normalizeOrigin(origin))
+      .filter(Boolean),
+  )];
+  if (normalizedAllowedOrigins.length === 0) {
+    return true;
+  }
+
   return (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+
+    const normalizedOrigin = normalizeOrigin(origin);
+
+    if (normalizedAllowedOrigins.includes(normalizedOrigin)) {
       callback(null, true);
       return;
     }
@@ -133,6 +162,13 @@ function createApp() {
   app.use("/api/upload", uploadRoutes);
   app.use("/api/optimization", optimizationRoutes);
   app.use("/api/ai", aiRoutes);
+
+  app.get("/", (_req, res) => {
+    res.status(200).json({
+      status: "OK",
+      message: "CarbonFlow API is running 🚀",
+    });
+  });
 
   app.use(notFoundHandler);
   app.use(errorHandler);

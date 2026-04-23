@@ -17,6 +17,9 @@ const registerShipmentSocket = require("./sockets/shipment.socket");
 const registerSupplierSocket = require("./sockets/supplier.socket");
 
 const app = createApp();
+const PORT = process.env.PORT || 5000;
+const BASE_URL = String(process.env.BASE_URL || env.baseUrl || `http://localhost:${PORT}`).replace(/\/+$/, "");
+const API_BASE_URL = `${BASE_URL}/api`;
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -52,17 +55,17 @@ registerSupplierSocket(io);
 
 function logStartupBanner() {
   logger.info("server.started", {
-    port: env.port,
-    baseUrl: `http://localhost:${env.port}`,
-    apiBase: `http://localhost:${env.port}/api`,
-    healthUrl: `http://localhost:${env.port}/api/health`,
+    port: PORT,
+    baseUrl: BASE_URL,
+    apiBase: API_BASE_URL,
+    healthUrl: `${API_BASE_URL}/health`,
   });
 }
 
 function handleServerError(error) {
   if (error.code === "EADDRINUSE") {
     logger.error("server.port_in_use", {
-      port: env.port,
+      port: PORT,
     });
     process.exit(1);
   }
@@ -83,7 +86,7 @@ async function startServer() {
   }
 
   await new Promise((resolve) => {
-    server.listen(env.port, () => {
+    server.listen(PORT, () => {
       logStartupBanner();
       resolve();
     });

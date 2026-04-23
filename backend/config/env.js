@@ -58,24 +58,51 @@ function isValidHttpUrl(value) {
   }
 }
 
+function normalizeHttpUrl(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    parsed.hash = "";
+    parsed.search = "";
+    return parsed.toString().replace(/\/+$/, "");
+  } catch {
+    return normalized.replace(/\/+$/, "");
+  }
+}
+
 const nodeEnv = process.env.NODE_ENV || "development";
+const port = parseNumber(process.env.PORT, 5000);
+const productionFrontendUrl = "https://carbonflow-nu.vercel.app";
+const defaultClientUrl = parseString(
+  process.env.CLIENT_URL,
+  parseString(process.env.FRONTEND_URL, "http://localhost:5173"),
+);
 const clientUrls = parseList(
   process.env.CLIENT_URLS,
-  [process.env.CLIENT_URL || "http://localhost:5173"],
+  [defaultClientUrl],
 );
-const frontendUrl = parseString(process.env.FRONTEND_URL, clientUrls[0] || "http://localhost:5173");
+const frontendUrl = parseString(process.env.FRONTEND_URL, clientUrls[0] || defaultClientUrl);
 const adminClientUrls = parseList(
   process.env.ADMIN_CLIENT_URLS,
   [process.env.ADMIN_CLIENT_URL || "http://localhost:3001"],
 );
-const allowedOrigins = [...new Set([...clientUrls, ...adminClientUrls])];
+const allowedOrigins = [...new Set(
+  [...clientUrls, ...adminClientUrls, frontendUrl, productionFrontendUrl]
+    .map((origin) => normalizeHttpUrl(origin))
+    .filter(Boolean),
+)];
+const baseUrl = normalizeHttpUrl(parseString(process.env.BASE_URL, `http://localhost:${port}`));
 
 const env = {
   nodeEnv,
   isProduction: nodeEnv === "production",
   isTest: nodeEnv === "test",
-  port: parseNumber(process.env.PORT, 5000),
-  baseUrl: process.env.BASE_URL || "http://localhost:5000",
+  port,
+  baseUrl,
   clientUrl: clientUrls[0] || "http://localhost:5173",
   clientUrls,
   frontendUrl,
@@ -152,6 +179,10 @@ function validateEnv() {
 
   if (!env.isTest && !isValidHttpUrl(env.frontendUrl)) {
     throw new Error("FRONTEND_URL must be a valid http(s) URL.");
+  }
+
+  if (!isValidHttpUrl(env.baseUrl)) {
+    throw new Error("BASE_URL must be a valid http(s) URL.");
   }
 
   if (hasMongoPlaceholders(env.mongoUri)) {
