@@ -5,9 +5,11 @@ import { defineConfig, loadEnv } from "vite";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "");
-  const proxyTarget = env.VITE_API_BASE_URL
+  const proxyTarget = env.VITE_SOCKET_URL
+    ? env.VITE_SOCKET_URL.replace(/\/+$/, "")
+    : env.VITE_API_BASE_URL
     ? env.VITE_API_BASE_URL.replace(/\/api\/?$/, "")
-    : "http://localhost:5000";
+    : "https://carbonflow-ql6n.onrender.com";
 
   return {
     plugins: [react(), tailwindcss()],
