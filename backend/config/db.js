@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const env = require("./env");
+const logger = require("../utils/logger");
 
 let connectionPromise = null;
 let listenersBound = false;
@@ -18,18 +19,20 @@ function bindConnectionEvents() {
 
   mongoose.connection.on("connected", () => {
     hasConnectedOnce = true;
-    console.log("[db] Mongoose connected");
+    logger.info("db.mongoose_connected");
   });
 
   mongoose.connection.on("error", (error) => {
     if (hasConnectedOnce) {
-      console.error("[db] Mongoose error:", formatConnectionError(error));
+      logger.error("db.mongoose_error", {
+        message: formatConnectionError(error),
+      });
     }
   });
 
   mongoose.connection.on("disconnected", () => {
     if (hasConnectedOnce) {
-      console.warn("[db] Mongoose disconnected");
+      logger.warn("db.mongoose_disconnected");
     }
   });
 }
@@ -84,13 +87,17 @@ async function attemptConnection() {
   for (let attempt = 1; attempt <= env.database.retryAttempts; attempt += 1) {
     try {
       const conn = await mongoose.connect(env.mongoUri, buildConnectionOptions());
-      console.log(`[db] MongoDB Connected: ${conn.connection.host}`);
+      logger.info("db.mongodb_connected", {
+        host: conn.connection.host,
+      });
       return conn;
     } catch (error) {
       lastError = error;
-      console.error(
-        `[db] MongoDB connection attempt ${attempt}/${env.database.retryAttempts} failed: ${formatConnectionError(error)}`,
-      );
+      logger.error("db.mongodb_connection_attempt_failed", {
+        attempt,
+        totalAttempts: env.database.retryAttempts,
+        message: formatConnectionError(error),
+      });
 
       if (attempt < env.database.retryAttempts) {
         await sleep(env.database.retryDelayMs);
@@ -129,7 +136,7 @@ async function closeDB() {
   if (mongoose.connection.readyState !== 0) {
     await mongoose.connection.close();
     if (hasConnectedOnce) {
-      console.log("[db] MongoDB disconnected");
+      logger.info("db.mongodb_disconnected");
     }
   }
 }

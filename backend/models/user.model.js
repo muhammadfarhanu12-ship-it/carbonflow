@@ -56,6 +56,26 @@ userSchema.virtual("organizationId").get(function getOrganizationId() {
   return this.companyId;
 });
 
+userSchema.index({ companyId: 1, role: 1, status: 1 });
+userSchema.index(
+  { emailVerificationToken: 1 },
+  {
+    sparse: true,
+    partialFilterExpression: {
+      emailVerificationToken: { $type: "string" },
+    },
+  },
+);
+userSchema.index(
+  { passwordResetTokenHash: 1 },
+  {
+    sparse: true,
+    partialFilterExpression: {
+      passwordResetTokenHash: { $type: "string" },
+    },
+  },
+);
+
 userSchema.statics.scope = function scope(name) {
   if (name !== "withPassword") {
     return this;

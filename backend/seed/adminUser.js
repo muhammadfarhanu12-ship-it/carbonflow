@@ -2,6 +2,7 @@ const bcrypt = require("bcryptjs");
 const { connectDB } = require("../config/db");
 const { Admin } = require("../models");
 const env = require("../config/env");
+const logger = require("../utils/logger");
 
 async function seedAdminUser() {
   await connectDB();
@@ -11,7 +12,7 @@ async function seedAdminUser() {
 
   const existingAdmin = await Admin.findOne({ email });
   if (existingAdmin) {
-    console.log(`[seed] admin account already exists for ${email}`);
+    logger.info("seed.admin.exists", { email });
     process.exit(0);
   }
 
@@ -24,11 +25,14 @@ async function seedAdminUser() {
     status: "active",
   });
 
-  console.log(`[seed] admin account created for ${email}`);
+  logger.info("seed.admin.created", { email });
   process.exit(0);
 }
 
 seedAdminUser().catch((error) => {
-  console.error("[seed] failed to create admin account", error);
+  logger.error("seed.admin.failed", {
+    error: error.message,
+    stack: env.isProduction ? undefined : error.stack,
+  });
   process.exit(1);
 });

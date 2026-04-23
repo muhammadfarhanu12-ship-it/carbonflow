@@ -9,13 +9,22 @@ import {
 
 const REQUEST_TIMEOUT_MS = 10000;
 const UNAUTHORIZED_EVENT_NAME = "carbonflow:unauthorized";
+const API_ERROR_EVENT_NAME = "carbonflow:api-error";
 let lastUnauthorizedEventAt = 0;
+let lastApiErrorEventAt = 0;
+let lastApiErrorSignature = "";
 
 type AuthFailureReason = "session_expired" | "unauthorized";
 
 type AuthFailureDetail = {
   reason: AuthFailureReason;
   message?: string;
+};
+
+type ApiErrorDetail = {
+  message: string;
+  statusCode?: number;
+  path?: string;
 };
 
 type ApiEnvelope<T> = {
@@ -91,6 +100,23 @@ function dispatchUnauthorizedEvent(detail: AuthFailureDetail) {
 
   lastUnauthorizedEventAt = now;
   window.dispatchEvent(new CustomEvent<AuthFailureDetail>(UNAUTHORIZED_EVENT_NAME, { detail }));
+}
+
+function dispatchApiErrorEvent(detail: ApiErrorDetail) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const now = Date.now();
+  const signature = `${detail.statusCode || 0}:${detail.path || ""}:${detail.message}`;
+
+  if (signature === lastApiErrorSignature && now - lastApiErrorEventAt < 1500) {
+    return;
+  }
+
+  lastApiErrorEventAt = now;
+  lastApiErrorSignature = signature;
+  window.dispatchEvent(new CustomEvent<ApiErrorDetail>(API_ERROR_EVENT_NAME, { detail }));
 }
 
 async function buildApiErrorMessage(error: unknown) {
@@ -229,6 +255,12 @@ axiosClient.interceptors.response.use(
       dispatchUnauthorizedEvent({
         reason: hadToken ? "session_expired" : "unauthorized",
         message,
+      });
+    } else if (!isAuthFlowRequest) {
+      dispatchApiErrorEvent({
+        message,
+        statusCode: status,
+        path: requestPath || undefined,
       });
     }
 

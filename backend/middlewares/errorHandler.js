@@ -1,6 +1,7 @@
 const ApiError = require("../utils/ApiError");
 const { sendError } = require("../utils/apiResponse");
 const logger = require("../utils/logger");
+const env = require("../config/env");
 
 function normalizeError(error) {
   if (error instanceof ApiError) {
@@ -57,18 +58,20 @@ function notFoundHandler(req, _res, next) {
 
 function errorHandler(error, req, res, _next) {
   const normalized = normalizeError(error);
+  const exposeDetails = !env.isProduction || normalized.statusCode < 500;
+  const safeMessage = exposeDetails ? normalized.message : "Internal server error";
 
   logger.error(normalized.message, {
     method: req.method,
     path: req.originalUrl,
     statusCode: normalized.statusCode,
-    stack: error.stack,
+    stack: env.isProduction ? undefined : error.stack,
   });
 
   return sendError(res, {
     statusCode: normalized.statusCode,
-    message: normalized.message,
-    errors: normalized.errors,
+    message: safeMessage,
+    errors: exposeDetails ? normalized.errors : undefined,
   });
 }
 

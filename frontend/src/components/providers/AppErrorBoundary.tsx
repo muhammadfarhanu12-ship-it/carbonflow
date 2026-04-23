@@ -15,7 +15,9 @@ export class AppErrorBoundary extends React.Component<React.PropsWithChildren, A
   }
 
   componentDidCatch(error: Error) {
-    console.error("CarbonFlow UI crashed", error);
+    if (import.meta.env.DEV) {
+      console.error("CarbonFlow UI crashed", error);
+    }
   }
 
   render() {

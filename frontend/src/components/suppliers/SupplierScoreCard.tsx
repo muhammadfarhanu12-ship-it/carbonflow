@@ -10,7 +10,6 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
@@ -23,6 +22,7 @@ import {
   CardTitle,
 } from "@/src/components/ui/card";
 import { SupplierBadge } from "@/src/components/suppliers/SupplierBadge";
+import { ChartWrapper } from "@/src/components/shared/ChartWrapper";
 import type {
   SupplierBenchmarkComparison,
   SupplierScoreResult,
@@ -116,8 +116,12 @@ export function SupplierScoreCard({
 
         <div className="rounded-xl border border-border p-4">
           <div className="mb-3 text-sm font-semibold text-foreground">Score Breakdown</div>
-          <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
+          <ChartWrapper
+            loading={false}
+            hasData={breakdownData.length > 0}
+            className="h-48 min-h-[192px]"
+            emptyMessage="No score breakdown data is available yet."
+          >
               <BarChart data={breakdownData} layout="vertical" margin={{ top: 8, right: 12, left: 8, bottom: 8 }}>
                 <CartesianGrid horizontal={false} strokeDasharray="3 3" />
                 <XAxis type="number" domain={[0, 50]} hide />
@@ -129,8 +133,7 @@ export function SupplierScoreCard({
                   ))}
                 </Bar>
               </BarChart>
-            </ResponsiveContainer>
-          </div>
+          </ChartWrapper>
         </div>
 
         <div className="rounded-xl border border-border p-4">

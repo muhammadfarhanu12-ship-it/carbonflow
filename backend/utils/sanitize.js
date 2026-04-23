@@ -1,4 +1,16 @@
+function sanitizeString(value) {
+  return String(value)
+    .replace(/\0/g, "")
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
+    .replace(/[<>]/g, "")
+    .trim();
+}
+
 function sanitizeValue(value) {
+  if (typeof value === "string") {
+    return sanitizeString(value);
+  }
+
   if (Array.isArray(value)) {
     return value.map(sanitizeValue);
   }
@@ -19,4 +31,5 @@ function sanitizeValue(value) {
 
 module.exports = {
   sanitizeValue,
+  sanitizeString,
 };

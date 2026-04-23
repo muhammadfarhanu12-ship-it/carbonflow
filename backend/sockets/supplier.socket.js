@@ -1,13 +1,15 @@
+const logger = require("../utils/logger");
+
 module.exports = (io) => {
   io.on("connection", (socket) => {
-    console.log("Client connected to supplier updates");
+    logger.debug("socket.suppliers.connected", { socketId: socket.id });
 
     socket.on("subscribeSuppliers", () => {
-      console.log("Client subscribed to supplier updates");
+      logger.debug("socket.suppliers.subscribed", { socketId: socket.id });
     });
 
     socket.on("disconnect", () => {
-      console.log("Client disconnected from supplier updates");
+      logger.debug("socket.suppliers.disconnected", { socketId: socket.id });
     });
   });
 };

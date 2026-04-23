@@ -3,6 +3,19 @@ import type { Socket } from "socket.io-client";
 import { SOCKET_URL } from "../config/backend";
 import { socket } from "./socket";
 
+function devLog(level: "info" | "error", message: string) {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  if (level === "error") {
+    console.error(message);
+    return;
+  }
+
+  console.info(message);
+}
+
 class SocketService {
   private socket: Socket = socket;
   private hasLifecycleLogging = false;
@@ -14,18 +27,18 @@ class SocketService {
 
     this.hasLifecycleLogging = true;
 
-    console.info(`[socket] backend URL: ${SOCKET_URL}`);
+    devLog("info", `[socket] backend URL: ${SOCKET_URL}`);
 
     this.socket.on("connect", () => {
-      console.info(`[socket] connected: ${this.socket.id}`);
+      devLog("info", `[socket] connected: ${this.socket.id}`);
     });
 
     this.socket.on("disconnect", (reason) => {
-      console.info(`[socket] disconnected: ${reason}`);
+      devLog("info", `[socket] disconnected: ${reason}`);
     });
 
     this.socket.on("connect_error", (error) => {
-      console.error(`[socket] connection failed for ${SOCKET_URL}: ${error.message}`);
+      devLog("error", `[socket] connection failed for ${SOCKET_URL}: ${error.message}`);
     });
   }
 

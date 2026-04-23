@@ -1,6 +1,12 @@
 .env
 .env.*
 !.env.example
+node_modules/
+**/node_modules/
+dist/
+**/dist/
 backend/.env
 backend/.env.*
 !backend/.env.example
+!frontend/.env.example
+!admin-panel/.env.example

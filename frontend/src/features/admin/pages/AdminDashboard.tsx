@@ -5,13 +5,13 @@ import {
   CartesianGrid,
   Line,
   LineChart,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 import { Building2, DollarSign, Leaf, Truck, Users } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card";
+import { ChartWrapper } from "@/src/components/shared/ChartWrapper";
 import { adminService } from "../services/adminService";
 import type { AdminDashboardMetrics } from "../types";
 
@@ -54,23 +54,20 @@ export function AdminDashboard() {
             <CardTitle>Emissions Trend</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-[320px] min-h-[300px]">
-              {metrics.monthlyTrends.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={metrics.monthlyTrends}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} />
-                    <YAxis axisLine={false} tickLine={false} />
-                    <Tooltip />
-                    <Line type="monotone" dataKey="emissions" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
-                  No emissions trend data available yet.
-                </div>
-              )}
-            </div>
+            <ChartWrapper
+              loading={false}
+              hasData={metrics.monthlyTrends.length > 0}
+              className="h-[320px] min-h-[300px]"
+              emptyMessage="No emissions trend data available yet."
+            >
+              <LineChart data={metrics.monthlyTrends}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} />
+                <YAxis axisLine={false} tickLine={false} />
+                <Tooltip />
+                <Line type="monotone" dataKey="emissions" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ChartWrapper>
           </CardContent>
         </Card>
 
@@ -79,23 +76,20 @@ export function AdminDashboard() {
             <CardTitle>Monthly Shipment Volume</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-[320px] min-h-[300px]">
-              {metrics.monthlyTrends.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={metrics.monthlyTrends}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} />
-                    <YAxis axisLine={false} tickLine={false} />
-                    <Tooltip />
-                    <Bar dataKey="shipments" fill="hsl(var(--primary))" radius={[8, 8, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
-                  No shipment trend data available yet.
-                </div>
-              )}
-            </div>
+            <ChartWrapper
+              loading={false}
+              hasData={metrics.monthlyTrends.length > 0}
+              className="h-[320px] min-h-[300px]"
+              emptyMessage="No shipment trend data available yet."
+            >
+              <BarChart data={metrics.monthlyTrends}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} />
+                <YAxis axisLine={false} tickLine={false} />
+                <Tooltip />
+                <Bar dataKey="shipments" fill="hsl(var(--primary))" radius={[8, 8, 0, 0]} />
+              </BarChart>
+            </ChartWrapper>
           </CardContent>
         </Card>
       </div>

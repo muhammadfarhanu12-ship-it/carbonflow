@@ -1,4 +1,4 @@
-import { axiosClient, buildAbsoluteApiUrl } from "./apiClient";
+import { axiosClient } from "./apiClient";
 import type {
   CarbonCreditTransaction,
   CheckoutTransactionResult,
@@ -39,11 +39,6 @@ export const creditsService = {
 
   downloadCertificate: async (id: string) => {
     const certificatePath = `/credits/${id}/certificate`;
-    const certificateUrl = buildAbsoluteApiUrl(certificatePath);
-
-    if (import.meta.env.DEV) {
-      console.log("[creditsService] Downloading certificate from", certificateUrl);
-    }
 
     const response = await axiosClient.get(certificatePath, {
       responseType: "blob",

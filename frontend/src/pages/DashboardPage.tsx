@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card";
 import {
   BarChart,
@@ -73,17 +73,17 @@ export function DashboardPage() {
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, []);
 
-  const dashboardData = data ?? EMPTY_DASHBOARD_DATA;
+  const dashboardData = useMemo(() => data ?? EMPTY_DASHBOARD_DATA, [data]);
   const { summary, monthly, costVsEmissions, transportModes } = dashboardData;
   const totalLogisticsCost = summary.totalLogisticsCost ?? summary.totalCost;
-  const metricCards = [
+  const metricCards = useMemo(() => [
     { label: "Total Emissions", value: `${summary.totalEmissions} tCO2e`, icon: Cloud },
     { label: "Scope 1", value: `${summary.scope1} tCO2e`, icon: Factory },
     { label: "Scope 2", value: `${summary.scope2} tCO2e`, icon: Activity },
     { label: "Scope 3", value: `${summary.scope3} tCO2e`, icon: Globe },
     { label: "Carbon Intensity", value: `${summary.carbonIntensity} ${summary.carbonIntensityUnit ?? "kgCO2e/USD"}`, icon: BarChart3 },
     { label: "Total Logistics Cost", value: `$${totalLogisticsCost.toLocaleString()}`, icon: DollarSign },
-  ];
+  ], [summary.carbonIntensity, summary.carbonIntensityUnit, summary.scope1, summary.scope2, summary.scope3, summary.totalEmissions, totalLogisticsCost]);
 
   return (
     <div className="w-full min-w-0 space-y-6">

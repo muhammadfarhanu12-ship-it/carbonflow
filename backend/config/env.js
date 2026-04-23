@@ -43,6 +43,21 @@ function hasMongoPlaceholders(value) {
   ].some((token) => normalized.includes(token));
 }
 
+function isValidHttpUrl(value) {
+  const normalized = String(value || "").trim();
+
+  if (!normalized) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 const nodeEnv = process.env.NODE_ENV || "development";
 const clientUrls = parseList(
   process.env.CLIENT_URLS,
@@ -111,6 +126,18 @@ function validateEnv() {
     missing.push("JWT_SECRET");
   }
 
+  if (!env.isTest && !process.env.FRONTEND_URL) {
+    missing.push("FRONTEND_URL");
+  }
+
+  if (!env.isTest && !process.env.EMAIL_USER && !process.env.SMTP_USER) {
+    missing.push("EMAIL_USER");
+  }
+
+  if (!env.isTest && !process.env.EMAIL_PASS && !process.env.SMTP_PASS) {
+    missing.push("EMAIL_PASS");
+  }
+
   if (env.isProduction && env.clientUrls.length === 0) {
     missing.push("CLIENT_URLS");
   }
@@ -121,6 +148,10 @@ function validateEnv() {
 
   if (!/^mongodb(\+srv)?:\/\//.test(env.mongoUri)) {
     throw new Error("MONGO_URI is not a valid MongoDB connection string.");
+  }
+
+  if (!env.isTest && !isValidHttpUrl(env.frontendUrl)) {
+    throw new Error("FRONTEND_URL must be a valid http(s) URL.");
   }
 
   if (hasMongoPlaceholders(env.mongoUri)) {
@@ -139,6 +170,14 @@ function validateEnv() {
 
   if (env.isProduction && env.admin.jwtSecret === "admin-super-secret-change-me") {
     throw new Error("ADMIN_JWT_SECRET must be changed before running in production.");
+  }
+
+  if (!env.isTest && !env.mail.user) {
+    throw new Error("EMAIL_USER or SMTP_USER must be configured.");
+  }
+
+  if (!env.isTest && !env.mail.pass) {
+    throw new Error("EMAIL_PASS or SMTP_PASS must be configured.");
   }
 }
 

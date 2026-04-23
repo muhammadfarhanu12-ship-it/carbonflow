@@ -6,6 +6,7 @@ const { connectDB, closeDB } = require("./config/db");
 const env = require("./config/env");
 const { createApp, buildCorsOriginValidator } = require("./app");
 const { seedDatabase } = require("./seed");
+const logger = require("./utils/logger");
 
 const registerDashboardSocket = require("./sockets/dashboard.socket");
 const registerLedgerSocket = require("./sockets/ledger.socket");
@@ -28,10 +29,16 @@ app.locals.io = io;
 
 io.on("connection", (socket) => {
   const origin = socket.handshake.headers.origin || "unknown-origin";
-  console.log(`[socket] client connected ${socket.id} from ${origin}`);
+  logger.info("socket.connected", {
+    socketId: socket.id,
+    origin,
+  });
 
   socket.on("disconnect", (reason) => {
-    console.log(`[socket] client disconnected ${socket.id} (${reason})`);
+    logger.info("socket.disconnected", {
+      socketId: socket.id,
+      reason,
+    });
   });
 });
 
@@ -44,23 +51,30 @@ registerShipmentSocket(io);
 registerSupplierSocket(io);
 
 function logStartupBanner() {
-  console.log(`[server] running on http://localhost:${env.port}`);
-  console.log(`[server] API base available at http://localhost:${env.port}/api`);
-  console.log(`[server] health check available at http://localhost:${env.port}/api/health`);
+  logger.info("server.started", {
+    port: env.port,
+    baseUrl: `http://localhost:${env.port}`,
+    apiBase: `http://localhost:${env.port}/api`,
+    healthUrl: `http://localhost:${env.port}/api/health`,
+  });
 }
 
 function handleServerError(error) {
   if (error.code === "EADDRINUSE") {
-    console.error(`[server] port ${env.port} is already in use. Stop the existing process or change PORT.`);
+    logger.error("server.port_in_use", {
+      port: env.port,
+    });
     process.exit(1);
   }
 
-  console.error("[server] runtime error", error);
+  logger.error("server.runtime_error", {
+    error: error.message,
+    stack: env.isProduction ? undefined : error.stack,
+  });
 }
 
 async function startServer() {
   server.on("error", handleServerError);
-  console.log("MONGO_URI Loaded:", process.env.MONGO_URI ? "YES" : "NO");
 
   await connectDB();
 
@@ -84,7 +98,7 @@ async function shutdown(signal) {
   }
 
   shuttingDown = true;
-  console.log(`[server] ${signal} received, shutting down gracefully`);
+  logger.info("server.shutdown_requested", { signal });
 
   try {
     await new Promise((resolve, reject) => {
@@ -101,7 +115,10 @@ async function shutdown(signal) {
     await closeDB();
     process.exit(0);
   } catch (error) {
-    console.error("[server] graceful shutdown failed", error);
+    logger.error("server.shutdown_failed", {
+      error: error.message,
+      stack: env.isProduction ? undefined : error.stack,
+    });
     process.exit(1);
   }
 }
@@ -110,6 +127,9 @@ process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 startServer().catch((error) => {
-  console.error("[server] startup failed", error.message);
+  logger.error("server.startup_failed", {
+    error: error.message,
+    stack: env.isProduction ? undefined : error.stack,
+  });
   process.exit(1);
 });

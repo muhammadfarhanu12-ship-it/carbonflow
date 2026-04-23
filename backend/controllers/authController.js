@@ -8,6 +8,7 @@ const env = require("../config/env");
 const { sendResetPasswordEmail, sendWelcomeEmail, sendEmailVerificationEmail } = require("../services/emailService");
 const UserContextService = require("../services/userContext.service");
 const { sendSuccess, sendError } = require("../utils/apiResponse");
+const logger = require("../utils/logger");
 
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -40,12 +41,70 @@ function buildRequestMeta(req) {
 }
 
 function logAuthFailure(scope, error, req) {
-  console.error(`[${scope}] failed`, {
+  const statusCode = error.statusCode || error.status || 500;
+  const message = error.message || "auth request failed";
+  const meta = {
     ...buildRequestMeta(req),
+    statusCode,
+    message,
+    stack: env.isProduction ? undefined : error.stack,
+  };
+
+  if (statusCode >= 500) {
+    logger.error(`${scope}.failed`, meta);
+    return;
+  }
+
+  logger.warn(`${scope}.failed`, meta);
+}
+
+function getSafeErrorMessage(error) {
+  const statusCode = error.statusCode || error.status || 500;
+  if (statusCode >= 500 && env.isProduction) {
+    return "Internal server error";
+  }
+
+  return error.message || "Internal server error";
+}
+
+function normalizeAuthError(error) {
+  if (!error || typeof error !== "object") {
+    return {
+      statusCode: 500,
+      message: "Internal server error",
+      errors: undefined,
+    };
+  }
+
+  if (error.code === 11000) {
+    return {
+      statusCode: 409,
+      message: "An account with that email already exists",
+      errors: undefined,
+    };
+  }
+
+  if (error.name === "TokenExpiredError") {
+    return {
+      statusCode: 401,
+      message: "Refresh token has expired",
+      errors: undefined,
+    };
+  }
+
+  if (error.name === "JsonWebTokenError") {
+    return {
+      statusCode: 401,
+      message: "Refresh token is invalid",
+      errors: undefined,
+    };
+  }
+
+  return {
     statusCode: error.statusCode || error.status || 500,
-    message: error.message,
-    stack: error.stack,
-  });
+    message: getSafeErrorMessage(error),
+    errors: error.errors || error.details || undefined,
+  };
 }
 
 function createEmailVerificationToken() {
@@ -72,11 +131,9 @@ function buildEmailVerificationUrl(token) {
 async function issueEmailVerificationToken(user, source = "auth.flow") {
   const { rawToken, tokenHash, expiresAt } = createEmailVerificationToken();
 
-  console.debug(`[${source}] email verification token generated`, {
+  logger.info(`${source}.verification_token_issued`, {
     userId: user.id,
     email: user.email,
-    rawToken,
-    hashedToken: tokenHash,
   });
 
   user.emailVerificationToken = tokenHash;
@@ -133,7 +190,11 @@ exports.signupValidators = [
   body("email").trim().normalizeEmail().isEmail().withMessage("A valid email address is required"),
   body("companyName").optional({ values: "falsy" }).trim().isLength({ max: 120 }).withMessage("Company name must be 120 characters or less"),
   body("company").optional({ values: "falsy" }).trim().isLength({ max: 120 }).withMessage("Company name must be 120 characters or less"),
-  body("password").isString().isLength({ min: 8 }).withMessage("Password must be at least 8 characters"),
+  body("password")
+    .isString()
+    .isLength({ min: 8 })
+    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).+$/)
+    .withMessage("Password must include uppercase, lowercase, number, and special character"),
   body("confirmPassword").optional({ values: "falsy" }).custom((value, { req }) => value === req.body.password).withMessage("Confirm password does not match"),
 ];
 
@@ -157,7 +218,11 @@ exports.forgotPasswordValidators = [
 
 exports.resetPasswordValidators = [
   body("token").isString().notEmpty().withMessage("Reset token is required"),
-  body("password").isString().isLength({ min: 8 }).withMessage("Password must be at least 8 characters"),
+  body("password")
+    .isString()
+    .isLength({ min: 8 })
+    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).+$/)
+    .withMessage("Password must include uppercase, lowercase, number, and special character"),
   body("confirmPassword").custom((value, { req }) => value === req.body.password).withMessage("Confirm password does not match"),
 ];
 
@@ -167,7 +232,7 @@ exports.refreshTokenValidators = [
 
 exports.signup = async (req, res) => {
   try {
-    console.log("[auth.signup] attempt", buildRequestMeta(req));
+    logger.info("auth.signup.attempt", buildRequestMeta(req));
     ensureDatabaseReady();
     const resolvedName = req.body.name || req.body.fullName;
     if (!resolvedName || !req.body.email || !req.body.password) {
@@ -216,17 +281,18 @@ exports.signup = async (req, res) => {
     });
   } catch (error) {
     logAuthFailure("auth.signup", error, req);
+    const normalizedError = normalizeAuthError(error);
     return sendError(res, {
-      statusCode: error.statusCode || error.status || 500,
-      message: error.message || "Internal server error",
-      errors: error.errors || undefined,
+      statusCode: normalizedError.statusCode,
+      message: normalizedError.message,
+      errors: normalizedError.errors,
     });
   }
 };
 
 exports.login = async (req, res) => {
   try {
-    console.log("[auth.login] attempt", buildRequestMeta(req));
+    logger.info("auth.login.attempt", buildRequestMeta(req));
     ensureDatabaseReady();
     if (!req.body.email || !req.body.password) {
       return sendError(res, {
@@ -278,15 +344,17 @@ exports.login = async (req, res) => {
       data: {
         user: toSafeUser(user),
         token: accessToken,
+        accessToken,
         refreshToken,
       },
     });
   } catch (error) {
     logAuthFailure("auth.login", error, req);
+    const normalizedError = normalizeAuthError(error);
     return sendError(res, {
-      statusCode: error.statusCode || error.status || 500,
-      message: error.message || "Internal server error",
-      errors: error.errors || undefined,
+      statusCode: normalizedError.statusCode,
+      message: normalizedError.message,
+      errors: normalizedError.errors,
     });
   }
 };
@@ -301,10 +369,6 @@ exports.verifyEmail = async (req, res) => {
 
     const payload = matchedData(req, { locations: ["body"] });
     const tokenHash = crypto.createHash("sha256").update(payload.token).digest("hex");
-
-    console.debug("[auth.verifyEmail] token received", {
-      hashedTokenFromRequest: tokenHash,
-    });
 
     const user = await User.scope("withPassword").findOne({
       emailVerificationToken: tokenHash,
@@ -352,10 +416,10 @@ exports.verifyEmail = async (req, res) => {
       to: user.email,
       name: user.name,
     }).catch((emailError) => {
-      console.error("[auth.verifyEmail] welcome email failed", {
+      logger.warn("auth.verifyEmail.welcome_email_failed", {
         userId: user.id,
         message: emailError.message,
-        stack: emailError.stack,
+        stack: env.isProduction ? undefined : emailError.stack,
       });
     });
 
@@ -364,10 +428,11 @@ exports.verifyEmail = async (req, res) => {
     });
   } catch (error) {
     logAuthFailure("auth.verifyEmail", error, req);
+    const normalizedError = normalizeAuthError(error);
     return sendError(res, {
-      statusCode: error.statusCode || error.status || 500,
-      message: error.message || "Internal server error",
-      errors: error.errors || undefined,
+      statusCode: normalizedError.statusCode,
+      message: normalizedError.message,
+      errors: normalizedError.errors,
     });
   }
 };
@@ -400,10 +465,11 @@ exports.resendVerification = async (req, res) => {
     });
   } catch (error) {
     logAuthFailure("auth.resendVerification", error, req);
+    const normalizedError = normalizeAuthError(error);
     return sendError(res, {
-      statusCode: error.statusCode || error.status || 500,
-      message: error.message || "Internal server error",
-      errors: error.errors || undefined,
+      statusCode: normalizedError.statusCode,
+      message: normalizedError.message,
+      errors: normalizedError.errors,
     });
   }
 };
@@ -427,7 +493,7 @@ exports.forgotPassword = async (req, res, next) => {
       user.passwordResetExpiresAt = new Date(Date.now() + 60 * 60 * 1000);
       await user.save();
 
-      const resetUrl = `${env.baseUrl}/auth/reset-password?token=${rawToken}`;
+      const resetUrl = `${env.frontendUrl}/auth/reset-password?token=${rawToken}`;
       await sendResetPasswordEmail({
         to: user.email,
         name: user.name,
@@ -538,12 +604,15 @@ exports.refreshToken = async (req, res, next) => {
     return sendSuccess(res, {
       message: "Token refreshed successfully",
       data: {
+        token: newAccessToken,
         accessToken: newAccessToken,
         refreshToken: newRefreshToken,
       },
     });
   } catch (error) {
-    error.statusCode = error.statusCode || 401;
+    if (error.name === "TokenExpiredError" || error.name === "JsonWebTokenError") {
+      error.statusCode = 401;
+    }
     next(error);
   }
 };

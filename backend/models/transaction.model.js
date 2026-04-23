@@ -20,17 +20,17 @@ const transactionSchema = withBaseSchema({
   shipmentReferences: { type: [String], default: [], immutable: true },
   shipmentStatus: { type: String, default: null, trim: true, immutable: true },
   shipmentStatuses: { type: [String], default: [], immutable: true },
-  credits: { type: Number, default: 0, immutable: true },
-  quantity: { type: Number, default: null, immutable: true },
-  price: { type: Number, default: 0, immutable: true },
-  pricePerTonUsd: { type: Number, default: 0, immutable: true },
-  pricePerTon: { type: Number, default: null, immutable: true },
-  subtotalUsd: { type: Number, default: 0, immutable: true },
-  platformFeeUsd: { type: Number, default: 0, immutable: true },
-  total: { type: Number, default: 0, immutable: true },
-  totalCostUsd: { type: Number, default: 0, immutable: true },
-  totalCost: { type: Number, default: null, immutable: true },
-  tCO2eRetired: { type: Number, default: null, immutable: true },
+  credits: { type: Number, default: 0, min: 0, immutable: true },
+  quantity: { type: Number, default: null, min: 0, immutable: true },
+  price: { type: Number, default: 0, min: 0, immutable: true },
+  pricePerTonUsd: { type: Number, default: 0, min: 0, immutable: true },
+  pricePerTon: { type: Number, default: null, min: 0, immutable: true },
+  subtotalUsd: { type: Number, default: 0, min: 0, immutable: true },
+  platformFeeUsd: { type: Number, default: 0, min: 0, immutable: true },
+  total: { type: Number, default: 0, min: 0, immutable: true },
+  totalCostUsd: { type: Number, default: 0, min: 0, immutable: true },
+  totalCost: { type: Number, default: null, min: 0, immutable: true },
+  tCO2eRetired: { type: Number, default: null, min: 0, immutable: true },
   serialNumber: { type: String, default: null, trim: true, immutable: true },
   idempotencyKey: { type: String, default: null, trim: true, immutable: true },
   requestChecksum: { type: String, default: null, trim: true, immutable: true },
@@ -52,6 +52,8 @@ const transactionSchema = withBaseSchema({
 });
 
 transactionSchema.index({ companyId: 1, retiredAt: -1 });
+transactionSchema.index({ companyId: 1, status: 1, createdAt: -1 });
+transactionSchema.index({ companyId: 1, projectId: 1, status: 1 });
 transactionSchema.index(
   { companyId: 1, idempotencyKey: 1 },
   {

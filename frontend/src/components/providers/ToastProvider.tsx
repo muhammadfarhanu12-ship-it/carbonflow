@@ -17,10 +17,17 @@ type ToastContextValue = {
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 const AUTH_UNAUTHORIZED_EVENT = "carbonflow:unauthorized";
+const API_ERROR_EVENT = "carbonflow:api-error";
 
 type AuthFailureDetail = {
   reason?: "session_expired" | "unauthorized";
   message?: string;
+};
+
+type ApiFailureDetail = {
+  message?: string;
+  statusCode?: number;
+  path?: string;
 };
 
 const toneMap = {
@@ -73,6 +80,38 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, onUnauthorized);
+    };
+  }, [showToast]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const onApiFailure = (event: Event) => {
+      const detail = (event as CustomEvent<ApiFailureDetail>).detail || {};
+      if (!detail.message) {
+        return;
+      }
+
+      const statusCode = Number(detail.statusCode || 0);
+      const title = statusCode >= 500
+        ? "Server error"
+        : statusCode >= 400
+          ? "Request failed"
+          : "Unexpected error";
+
+      showToast({
+        tone: "error",
+        title,
+        description: detail.message,
+      });
+    };
+
+    window.addEventListener(API_ERROR_EVENT, onApiFailure);
+
+    return () => {
+      window.removeEventListener(API_ERROR_EVENT, onApiFailure);
     };
   }, [showToast]);
 
