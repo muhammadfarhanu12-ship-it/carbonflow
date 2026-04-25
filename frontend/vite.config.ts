@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
     ? env.VITE_SOCKET_URL.replace(/\/+$/, "")
     : env.VITE_API_BASE_URL
     ? env.VITE_API_BASE_URL.replace(/\/api\/?$/, "")
-    : "https://carbonflow-ql6n.onrender.com";
+    : "https://carbonflow-h9cj.onrender.com";
 
   return {
     plugins: [react(), tailwindcss()],

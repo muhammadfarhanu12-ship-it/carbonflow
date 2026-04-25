@@ -18,6 +18,7 @@ type ToastContextValue = {
 const ToastContext = createContext<ToastContextValue | null>(null);
 const AUTH_UNAUTHORIZED_EVENT = "carbonflow:unauthorized";
 const API_ERROR_EVENT = "carbonflow:api-error";
+const API_RETRY_EVENT = "carbonflow:api-retry";
 
 type AuthFailureDetail = {
   reason?: "session_expired" | "unauthorized";
@@ -27,6 +28,11 @@ type AuthFailureDetail = {
 type ApiFailureDetail = {
   message?: string;
   statusCode?: number;
+  path?: string;
+};
+
+type ApiRetryDetail = {
+  message?: string;
   path?: string;
 };
 
@@ -80,6 +86,28 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, onUnauthorized);
+    };
+  }, [showToast]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const onApiRetry = (event: Event) => {
+      const detail = (event as CustomEvent<ApiRetryDetail>).detail || {};
+
+      showToast({
+        tone: "info",
+        title: "Connecting to server",
+        description: detail.message || "Backend is waking up. Retrying your request...",
+      });
+    };
+
+    window.addEventListener(API_RETRY_EVENT, onApiRetry);
+
+    return () => {
+      window.removeEventListener(API_RETRY_EVENT, onApiRetry);
     };
   }, [showToast]);
 

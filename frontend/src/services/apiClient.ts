@@ -7,12 +7,17 @@ import {
   setStoredTokens,
 } from "@/src/utils/authSession";
 
-const REQUEST_TIMEOUT_MS = 10000;
+const REQUEST_TIMEOUT_MS = 15000;
+const COLD_START_RETRY_DELAY_MS = 1200;
+const COLD_START_RETRY_STATUS_CODES = new Set([502, 503, 504]);
 const UNAUTHORIZED_EVENT_NAME = "carbonflow:unauthorized";
 const API_ERROR_EVENT_NAME = "carbonflow:api-error";
+const API_RETRY_EVENT_NAME = "carbonflow:api-retry";
 let lastUnauthorizedEventAt = 0;
 let lastApiErrorEventAt = 0;
 let lastApiErrorSignature = "";
+let lastApiRetryEventAt = 0;
+let lastApiRetrySignature = "";
 
 type AuthFailureReason = "session_expired" | "unauthorized";
 
@@ -24,6 +29,11 @@ type AuthFailureDetail = {
 type ApiErrorDetail = {
   message: string;
   statusCode?: number;
+  path?: string;
+};
+
+type ApiRetryDetail = {
+  message: string;
   path?: string;
 };
 
@@ -117,6 +127,49 @@ function dispatchApiErrorEvent(detail: ApiErrorDetail) {
   lastApiErrorEventAt = now;
   lastApiErrorSignature = signature;
   window.dispatchEvent(new CustomEvent<ApiErrorDetail>(API_ERROR_EVENT_NAME, { detail }));
+}
+
+function dispatchApiRetryEvent(detail: ApiRetryDetail) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const now = Date.now();
+  const signature = `${detail.path || ""}:${detail.message}`;
+
+  if (signature === lastApiRetrySignature && now - lastApiRetryEventAt < 1500) {
+    return;
+  }
+
+  lastApiRetryEventAt = now;
+  lastApiRetrySignature = signature;
+  window.dispatchEvent(new CustomEvent<ApiRetryDetail>(API_RETRY_EVENT_NAME, { detail }));
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function shouldRetryColdStart(
+  error: AxiosError,
+  requestConfig: { _coldStartRetried?: boolean },
+) {
+  if (requestConfig._coldStartRetried) {
+    return false;
+  }
+
+  if (error.code === "ERR_CANCELED") {
+    return false;
+  }
+
+  const status = error.response?.status;
+  if (typeof status === "number" && COLD_START_RETRY_STATUS_CODES.has(status)) {
+    return true;
+  }
+
+  return !error.response && (error.code === "ECONNABORTED" || error.code === "ERR_NETWORK");
 }
 
 async function buildApiErrorMessage(error: unknown) {
@@ -219,7 +272,10 @@ axiosClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     const status = error.response?.status;
-    const originalRequest = (error.config || {}) as typeof error.config & { _retry?: boolean };
+    const originalRequest = (error.config || {}) as typeof error.config & {
+      _retry?: boolean;
+      _coldStartRetried?: boolean;
+    };
     const requestPath = String(originalRequest.url || "");
     const isAuthFlowRequest = [
       "/auth/login",
@@ -232,6 +288,16 @@ axiosClient.interceptors.response.use(
       "/auth/resend-verification",
     ].some((path) => requestPath.includes(path));
     const hadToken = Boolean(getAccessToken());
+
+    if (shouldRetryColdStart(error, originalRequest)) {
+      originalRequest._coldStartRetried = true;
+      dispatchApiRetryEvent({
+        message: "Waking backend server. Retrying request once...",
+        path: requestPath || undefined,
+      });
+      await wait(COLD_START_RETRY_DELAY_MS);
+      return axiosClient(originalRequest);
+    }
 
     if (
       status === 401
@@ -263,6 +329,8 @@ axiosClient.interceptors.response.use(
         path: requestPath || undefined,
       });
     }
+
+    console.error("API ERROR:", error);
 
     return Promise.reject(new Error(message));
   },

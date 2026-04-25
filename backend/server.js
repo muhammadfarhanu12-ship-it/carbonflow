@@ -4,7 +4,7 @@ const http = require("http");
 const { Server } = require("socket.io");
 const { connectDB, closeDB } = require("./config/db");
 const env = require("./config/env");
-const { createApp, buildCorsOriginValidator } = require("./app");
+const { createApp, buildCorsOriginValidator, resolveCorsOrigins } = require("./app");
 const { seedDatabase } = require("./seed");
 const logger = require("./utils/logger");
 
@@ -18,12 +18,13 @@ const registerSupplierSocket = require("./sockets/supplier.socket");
 
 const app = createApp();
 const PORT = process.env.PORT || 5000;
-const BASE_URL = String(process.env.BASE_URL || env.baseUrl || `http://localhost:${PORT}`).replace(/\/+$/, "");
+const BASE_URL = String(process.env.BASE_URL || env.baseUrl).replace(/\/+$/, "");
 const API_BASE_URL = `${BASE_URL}/api`;
+const corsOrigins = resolveCorsOrigins();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: buildCorsOriginValidator(env.allowedOrigins),
+    origin: buildCorsOriginValidator(corsOrigins),
     credentials: true,
   },
 });
@@ -59,6 +60,7 @@ function logStartupBanner() {
     baseUrl: BASE_URL,
     apiBase: API_BASE_URL,
     healthUrl: `${API_BASE_URL}/health`,
+    corsOrigins,
   });
 }
 

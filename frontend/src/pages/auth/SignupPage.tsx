@@ -286,6 +286,11 @@ export function SignupPage() {
                     'Create account'
                   )}
                 </Button>
+                {isLoading ? (
+                  <p className="mt-2 text-center text-xs text-muted-foreground">
+                    Connecting to server. The first request may take a little longer.
+                  </p>
+                ) : null}
               </div>
             </form>
           )}

@@ -31,6 +31,7 @@ const uploadRoutes = require("./routes/upload.routes");
 const optimizationRoutes = require("./routes/optimization.routes");
 const aiRoutes = require("./routes/ai.routes.ts");
 const CheckoutLockService = require("./services/checkoutLock.service");
+const PRODUCTION_FRONTEND_ORIGIN = "https://carbonflow-nu.vercel.app";
 
 function normalizeOrigin(value) {
   const normalized = String(value || "").trim();
@@ -76,6 +77,16 @@ function buildCorsOriginValidator(allowedOrigins) {
   };
 }
 
+function resolveCorsOrigins() {
+  const strictProductionOrigin = normalizeOrigin(env.frontendUrl || PRODUCTION_FRONTEND_ORIGIN) || PRODUCTION_FRONTEND_ORIGIN;
+
+  if (env.isProduction) {
+    return [strictProductionOrigin];
+  }
+
+  return env.allowedOrigins;
+}
+
 function createApp() {
   const app = express();
   CheckoutLockService.startCleanupWorker();
@@ -83,8 +94,9 @@ function createApp() {
   app.set("trust proxy", 1);
   app.disable("x-powered-by");
 
+  const corsOrigins = resolveCorsOrigins();
   const corsOptions = {
-    origin: buildCorsOriginValidator(env.allowedOrigins),
+    origin: buildCorsOriginValidator(corsOrigins),
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "Idempotency-Key", "X-Idempotency-Key"],
@@ -138,9 +150,13 @@ function createApp() {
   };
 
   app.get("/health", healthHandler);
-  app.get("/api/health", healthHandler);
+  app.get("/api/health", (_req, res) => {
+    res.status(200).json({ status: "OK" });
+  });
 
-  app.use("/auth", authRoutes);
+  if (!env.isProduction) {
+    app.use("/auth", authRoutes);
+  }
   app.use("/api/auth", authRoutes);
   app.use("/api/admin", adminRoutes);
   app.use("/api/users", usersRoutes);
@@ -164,10 +180,7 @@ function createApp() {
   app.use("/api/ai", aiRoutes);
 
   app.get("/", (_req, res) => {
-    res.status(200).json({
-      status: "OK",
-      message: "CarbonFlow API is running 🚀",
-    });
+    res.status(200).send("CarbonFlow API running");
   });
 
   app.use(notFoundHandler);
@@ -179,4 +192,5 @@ function createApp() {
 module.exports = {
   createApp,
   buildCorsOriginValidator,
+  resolveCorsOrigins,
 };

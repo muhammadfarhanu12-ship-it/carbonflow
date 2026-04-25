@@ -2,7 +2,7 @@ function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
 }
 
-const DEFAULT_BACKEND_ORIGIN = "https://carbonflow-ql6n.onrender.com";
+const DEFAULT_BACKEND_ORIGIN = "https://carbonflow-h9cj.onrender.com";
 const DEFAULT_API_BASE_URL = `${DEFAULT_BACKEND_ORIGIN}/api`;
 
 function normalizeAbsoluteUrl(value: string, variableName: string, exampleUrl: string) {
@@ -24,7 +24,8 @@ function normalizeAbsoluteUrl(value: string, variableName: string, exampleUrl: s
   return trimTrailingSlash(parsedUrl.toString());
 }
 
-const rawApiBaseUrl = import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL;
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
+const rawApiBaseUrl = API_BASE || DEFAULT_API_BASE_URL;
 const rawSocketUrl = import.meta.env.VITE_SOCKET_URL;
 const normalizedApiBaseUrl = normalizeAbsoluteUrl(rawApiBaseUrl, "VITE_API_BASE_URL", DEFAULT_API_BASE_URL);
 
