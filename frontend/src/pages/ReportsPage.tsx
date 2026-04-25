@@ -3,7 +3,7 @@ import { Download, FileSpreadsheet, FileText, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card";
 import { Button } from "@/src/components/ui/button";
 import { reportsService } from "@/src/services/reportsService";
-import { API_BASE_URL } from "@/src/services/apiClient";
+import { buildAbsoluteApiUrl } from "@/src/services/apiClient";
 import { socketService } from "@/src/services/socketService";
 import { useToast } from "@/src/components/providers/ToastProvider";
 import type { ReportItem } from "@/src/types/platform";
@@ -55,6 +55,16 @@ export function ReportsPage() {
     }
   };
 
+  const openReportDownload = (downloadUrl: string) => {
+    try {
+      const absoluteUrl = buildAbsoluteApiUrl(downloadUrl);
+      window.open(absoluteUrl, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      console.error("API ERROR:", error);
+      setError("Failed to open report download.");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -102,7 +112,7 @@ export function ReportsPage() {
                     <td className="px-6 py-4">{new Date(report.generatedAt).toLocaleString()}</td>
                     <td className="px-6 py-4">{report.status}</td>
                     <td className="px-6 py-4 text-right">
-                      <Button variant="ghost" size="sm" onClick={() => window.open(`${API_BASE_URL.replace(/\/api$/, "")}${report.downloadUrl}`, "_blank")}>
+                      <Button variant="ghost" size="sm" onClick={() => openReportDownload(report.downloadUrl)}>
                         <Download className="mr-2 h-4 w-4" />
                         {report.format}
                       </Button>

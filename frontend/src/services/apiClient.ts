@@ -44,6 +44,21 @@ type ApiEnvelope<T> = {
   errors?: unknown;
 };
 
+function normalizeApiPath(path: string) {
+  const normalizedPath = String(path || "").trim();
+
+  if (!normalizedPath) {
+    return "/";
+  }
+
+  if (/^https?:\/\//i.test(normalizedPath)) {
+    return normalizedPath;
+  }
+
+  const prefixed = normalizedPath.startsWith("/") ? normalizedPath : `/${normalizedPath}`;
+  return prefixed.replace(/^\/api(?=\/|$)/i, "") || "/";
+}
+
 function parseBackendErrorPayload(payload: unknown) {
   if (!payload) {
     return null;
@@ -217,6 +232,10 @@ axiosClient.interceptors.request.use((config) => {
   const token = getAccessToken();
   config.headers = config.headers || new AxiosHeaders();
 
+  if (typeof config.url === "string" && config.url) {
+    config.url = normalizeApiPath(config.url);
+  }
+
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -345,7 +364,12 @@ function unwrapResponse<T>(payload: T | ApiEnvelope<T>): T {
 }
 
 function buildAbsoluteApiUrl(path: string) {
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const rawPath = String(path || "").trim();
+  if (/^https?:\/\//i.test(rawPath)) {
+    return rawPath;
+  }
+
+  const normalizedPath = normalizeApiPath(path);
   const requestPath = `${API_BASE_URL.replace(/\/$/, "")}${normalizedPath}`;
   const origin = typeof window !== "undefined" ? window.location.origin : BACKEND_ORIGIN;
 

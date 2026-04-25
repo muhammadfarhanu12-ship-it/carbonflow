@@ -137,7 +137,7 @@ export function DashboardPage() {
           <CardHeader>
             <CardTitle>Monthly Emissions Trend</CardTitle>
           </CardHeader>
-          <CardContent className="w-full min-w-0">
+          <CardContent className="w-full min-w-0 min-h-[320px]">
             <ChartWrapper
               loading={loading}
               hasData={monthly.length > 0}
@@ -162,7 +162,7 @@ export function DashboardPage() {
           <CardHeader>
             <CardTitle>Cost vs Emissions</CardTitle>
           </CardHeader>
-          <CardContent className="w-full min-w-0">
+          <CardContent className="w-full min-w-0 min-h-[320px]">
             <ChartWrapper
               loading={loading}
               hasData={costVsEmissions.length > 0}
@@ -188,7 +188,7 @@ export function DashboardPage() {
         <CardHeader>
           <CardTitle>Transport Mode Emissions</CardTitle>
         </CardHeader>
-        <CardContent className="w-full min-w-0">
+        <CardContent className="w-full min-w-0 min-h-[300px]">
           <ChartWrapper
             loading={loading}
             hasData={transportModes.length > 0}

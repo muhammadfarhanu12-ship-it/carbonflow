@@ -53,7 +53,7 @@ export function AdminDashboard() {
           <CardHeader>
             <CardTitle>Emissions Trend</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="w-full min-w-0 min-h-[320px]">
             <ChartWrapper
               loading={false}
               hasData={metrics.monthlyTrends.length > 0}
@@ -75,7 +75,7 @@ export function AdminDashboard() {
           <CardHeader>
             <CardTitle>Monthly Shipment Volume</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="w-full min-w-0 min-h-[320px]">
             <ChartWrapper
               loading={false}
               hasData={metrics.monthlyTrends.length > 0}

@@ -21,11 +21,11 @@ export function ChartWrapper({
   loadingMessage = "Loading chart...",
   emptyMessage = "No data available",
   emptyStateClassName,
-  minWidth = 300,
+  minWidth = 1,
 }: ChartWrapperProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isReady, setIsReady] = useState(false);
-  const [hasSize, setHasSize] = useState(false);
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
 
   useEffect(() => {
     const timerId = window.setTimeout(() => {
@@ -44,16 +44,28 @@ export function ChartWrapper({
       return;
     }
 
-    const updateHasSize = () => {
+    const updateSize = () => {
       const { width, height } = container.getBoundingClientRect();
-      setHasSize(width > 0 && height > 0);
+      const nextWidth = Math.max(Math.floor(width), 0);
+      const nextHeight = Math.max(Math.floor(height), 0);
+
+      setContainerSize((current) => {
+        if (current.width === nextWidth && current.height === nextHeight) {
+          return current;
+        }
+
+        return {
+          width: nextWidth,
+          height: nextHeight,
+        };
+      });
     };
 
-    updateHasSize();
+    updateSize();
 
     if (typeof ResizeObserver !== "undefined") {
       const observer = new ResizeObserver(() => {
-        updateHasSize();
+        updateSize();
       });
       observer.observe(container);
 
@@ -62,20 +74,24 @@ export function ChartWrapper({
       };
     }
 
-    window.addEventListener("resize", updateHasSize);
+    window.addEventListener("resize", updateSize);
 
     return () => {
-      window.removeEventListener("resize", updateHasSize);
+      window.removeEventListener("resize", updateSize);
     };
   }, []);
 
-  const shouldRenderChart = !loading && hasData && isReady && hasSize;
+  const hasRenderableSize = containerSize.width > 0 && containerSize.height > 0;
+  const shouldRenderChart = !loading && hasData && isReady && hasRenderableSize;
   const shouldRenderLoading = loading || (!shouldRenderChart && hasData);
 
   return (
     <div ref={containerRef} className={cn("h-[300px] min-h-[300px] w-full min-w-0", className)}>
       {shouldRenderChart ? (
-        <ResponsiveContainer width="100%" height="100%" minWidth={minWidth}>
+        <ResponsiveContainer
+          width={Math.max(containerSize.width, minWidth)}
+          height={Math.max(containerSize.height, 1)}
+        >
           {children}
         </ResponsiveContainer>
       ) : shouldRenderLoading ? (
