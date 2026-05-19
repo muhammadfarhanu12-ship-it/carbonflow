@@ -12,6 +12,7 @@ const emptyForm: Partial<EmissionFactor> = {
   scope: 1,
   category: "",
   activityType: "",
+  factorKey: "",
   activityUnit: "",
   factorValue: 0,
   factorUnit: "kgCO2e/unit",
@@ -28,7 +29,7 @@ const emptyForm: Partial<EmissionFactor> = {
 
 export function CarbonDataPage() {
   const [factors, setFactors] = useState<EmissionFactor[]>([]);
-  const [filters, setFilters] = useState({ search: "", scope: "", category: "", source: "", sourceYear: "", country: "", isSample: "", isActive: "" });
+  const [filters, setFilters] = useState({ search: "", scope: "", category: "", factorKey: "", source: "", sourceYear: "", country: "", isSample: "", isActive: "" });
   const [form, setForm] = useState<Partial<EmissionFactor>>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -142,6 +143,7 @@ export function CarbonDataPage() {
             </Field>
             <Field label="Category"><Input value={form.category || ""} onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))} required /></Field>
             <Field label="Activity Type"><Input value={form.activityType || ""} onChange={(event) => setForm((current) => ({ ...current, activityType: event.target.value }))} required /></Field>
+            <Field label="Factor Key"><Input value={form.factorKey || ""} onChange={(event) => setForm((current) => ({ ...current, factorKey: event.target.value }))} placeholder="DIESEL, US, WASTE_LANDFILL_KG" /></Field>
             <Field label="Activity Unit"><Input value={form.activityUnit || ""} onChange={(event) => setForm((current) => ({ ...current, activityUnit: event.target.value }))} required /></Field>
             <Field label="Factor Value"><Input type="number" min="0" step="0.000001" value={form.factorValue ?? 0} onChange={(event) => setForm((current) => ({ ...current, factorValue: Number(event.target.value) }))} required /></Field>
             <Field label="Factor Unit"><Input value={form.factorUnit || ""} onChange={(event) => setForm((current) => ({ ...current, factorUnit: event.target.value }))} required /></Field>
@@ -178,6 +180,7 @@ export function CarbonDataPage() {
               <option value="3">Scope 3</option>
             </select>
             <Input placeholder="Category" value={filters.category} onChange={(event) => setFilters((current) => ({ ...current, category: event.target.value }))} />
+            <Input placeholder="Factor key" value={filters.factorKey} onChange={(event) => setFilters((current) => ({ ...current, factorKey: event.target.value }))} />
             <Input placeholder="Source" value={filters.source} onChange={(event) => setFilters((current) => ({ ...current, source: event.target.value }))} />
             <Input placeholder="Year" value={filters.sourceYear} onChange={(event) => setFilters((current) => ({ ...current, sourceYear: event.target.value }))} />
             <Input placeholder="Country" value={filters.country} onChange={(event) => setFilters((current) => ({ ...current, country: event.target.value }))} />
@@ -202,6 +205,7 @@ export function CarbonDataPage() {
                   <th className="px-4 py-3 font-medium">Scope</th>
                   <th className="px-4 py-3 font-medium">Category</th>
                   <th className="px-4 py-3 font-medium">Activity</th>
+                  <th className="px-4 py-3 font-medium">Key</th>
                   <th className="px-4 py-3 font-medium">Factor</th>
                   <th className="px-4 py-3 font-medium">Source</th>
                   <th className="px-4 py-3 font-medium">Region</th>
@@ -211,15 +215,16 @@ export function CarbonDataPage() {
               </thead>
               <tbody className="divide-y divide-border">
                 {loading ? (
-                  <tr><td colSpan={9} className="px-6 py-6 text-center text-muted-foreground">Loading factors...</td></tr>
+                  <tr><td colSpan={10} className="px-6 py-6 text-center text-muted-foreground">Loading factors...</td></tr>
                 ) : factors.length === 0 ? (
-                  <tr><td colSpan={9} className="px-6 py-6 text-center text-muted-foreground">No emission factors found.</td></tr>
+                  <tr><td colSpan={10} className="px-6 py-6 text-center text-muted-foreground">No emission factors found.</td></tr>
                 ) : factors.map((factor) => (
                   <tr key={factor.id} className="hover:bg-muted/40">
                     <td className="px-4 py-3 font-medium text-foreground">{factor.name}</td>
                     <td className="px-4 py-3">Scope {factor.scope}</td>
                     <td className="px-4 py-3">{factor.category}</td>
                     <td className="px-4 py-3">{factor.activityType} / {factor.activityUnit || factor.unit}</td>
+                    <td className="px-4 py-3">{factor.factorKey || "-"}</td>
                     <td className="px-4 py-3">{factor.factorValue ?? factor.value} {factor.factorUnit}</td>
                     <td className="px-4 py-3">{factor.sourceName || factor.source} {factor.sourceYear}</td>
                     <td className="px-4 py-3">{factor.country || factor.region || "GLOBAL"}</td>

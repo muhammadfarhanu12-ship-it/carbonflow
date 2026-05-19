@@ -83,6 +83,7 @@ class EmissionRecordService {
       scope: payload.scope,
       category: payload.category,
       activityType: payload.activityType,
+      factorKey: payload.factorKey || payload.fuelType,
       activityUnit: payload.activityUnit || payload.unit,
       country: payload.country,
       region,
@@ -164,6 +165,7 @@ class EmissionRecordService {
       },
       metadata: {
         factorId: factor?._id || factor?.id || null,
+        factorKey: factor?.factorKey || factor?.key || payload.factorKey || payload.fuelType || null,
         factorIsSample: calculation.factorIsSample,
       },
       occurredAt: payload.occurredAt || new Date(),

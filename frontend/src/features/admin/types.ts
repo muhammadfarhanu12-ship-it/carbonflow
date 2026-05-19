@@ -46,6 +46,7 @@ export interface EmissionFactor {
   scope: 1 | 2 | 3;
   category: string;
   activityType: string;
+  factorKey?: string | null;
   activityUnit: string;
   factorValue: number;
   value: number;

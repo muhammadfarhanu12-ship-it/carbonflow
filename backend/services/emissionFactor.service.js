@@ -11,6 +11,9 @@ function normalizeFactorPayload(payload = {}, actor = null) {
     scope: Number(payload.scope),
     category: String(payload.category || "").trim(),
     activityType: String(payload.activityType || "").trim().toLowerCase(),
+    factorKey: payload.factorKey || payload.fuelType
+      ? String(payload.factorKey || payload.fuelType).trim().replace(/[\s-]+/g, "_").toUpperCase()
+      : null,
     activityUnit,
     factorValue,
     value: factorValue,
@@ -63,13 +66,16 @@ function scoreFactor(factor = {}, criteria = {}) {
   const companyId = String(criteria.companyId || "").trim();
   const country = normalizeGeo(criteria.country);
   const region = normalizeGeo(criteria.region || "GLOBAL");
+  const factorKey = normalizeGeo(criteria.factorKey || criteria.fuelType);
   const factorCompanyId = String(factor.companyId || "").trim();
   const factorCountry = normalizeGeo(factor.country);
   const factorRegion = normalizeGeo(factor.region || "GLOBAL");
+  const candidateFactorKey = normalizeGeo(factor.factorKey || factor.key);
 
   let score = 0;
   if (companyId && factorCompanyId === companyId) score += 1000;
   if (!factorCompanyId) score += 100;
+  if (factorKey && candidateFactorKey === factorKey) score += 120;
   if (country && factorCountry === country) score += 80;
   if (!country && factorCountry) score += 5;
   if (region && factorRegion === region) score += 40;
@@ -85,16 +91,19 @@ function selectBestMatchingFactor(factors = [], criteria = {}) {
   const scope = Number(criteria.scope);
   const category = normalizeText(criteria.category);
   const activityType = normalizeText(criteria.activityType);
+  const factorKey = normalizeGeo(criteria.factorKey || criteria.fuelType);
   const activityUnit = normalizeText(criteria.activityUnit || criteria.unit);
 
   const eligible = factors.filter((factor) => {
     const effectiveFrom = factor.effectiveFrom ? new Date(factor.effectiveFrom) : null;
     const effectiveTo = factor.effectiveTo ? new Date(factor.effectiveTo) : null;
     const factorUnit = normalizeText(factor.activityUnit || factor.unit);
+    const candidateFactorKey = normalizeGeo(factor.factorKey || factor.key);
     return factor.isActive !== false
       && Number(factor.scope) === scope
       && normalizeText(factor.category) === category
       && normalizeText(factor.activityType) === activityType
+      && (!factorKey || !candidateFactorKey || candidateFactorKey === factorKey)
       && factorUnit === activityUnit
       && (!effectiveFrom || effectiveFrom <= asOfDate)
       && (!effectiveTo || effectiveTo >= asOfDate);
@@ -148,6 +157,9 @@ class EmissionFactorService {
     const scope = Number(criteria.scope);
     const category = String(criteria.category || "").trim();
     const activityType = String(criteria.activityType || "").trim().toLowerCase();
+    const factorKey = criteria.factorKey || criteria.fuelType
+      ? String(criteria.factorKey || criteria.fuelType).trim().replace(/[\s-]+/g, "_").toUpperCase()
+      : null;
     const activityUnit = String(criteria.activityUnit || criteria.unit || "").trim();
     const companyId = criteria.companyId ? String(criteria.companyId).trim() : null;
     const asOfDate = new Date(criteria.occurredAt || criteria.asOfDate || Date.now());
@@ -167,6 +179,7 @@ class EmissionFactorService {
       ],
       $and: [
         { $or: [{ companyId }, { companyId: null }, { companyId: "" }] },
+        { $or: [{ factorKey }, { factorKey: null }, { factorKey: "" }, { factorKey: { $exists: false } }] },
         { $or: [{ effectiveFrom: null }, { effectiveFrom: { $lte: asOfDate } }] },
         { $or: [{ effectiveTo: null }, { effectiveTo: { $gte: asOfDate } }] },
       ],
@@ -180,6 +193,7 @@ class EmissionFactorService {
     const filter = {};
     if (query.scope) filter.scope = Number(query.scope);
     if (query.category) filter.category = { $regex: query.category, $options: "i" };
+    if (query.factorKey) filter.factorKey = String(query.factorKey).toUpperCase();
     if (query.source || query.sourceName) filter.sourceName = { $regex: query.source || query.sourceName, $options: "i" };
     if (query.sourceYear) filter.sourceYear = Number(query.sourceYear);
     if (query.country) filter.country = String(query.country).toUpperCase();
@@ -188,7 +202,7 @@ class EmissionFactorService {
     if (query.isSample !== undefined) filter.isSample = String(query.isSample) === "true";
     if (query.isActive !== undefined) filter.isActive = String(query.isActive) === "true";
     if (query.search) {
-      filter.$or = ["name", "category", "activityType", "sourceName"].map((field) => ({
+      filter.$or = ["name", "category", "activityType", "factorKey", "sourceName"].map((field) => ({
         [field]: { $regex: String(query.search), $options: "i" },
       }));
     }

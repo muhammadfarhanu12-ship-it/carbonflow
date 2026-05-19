@@ -9,6 +9,7 @@ import { emissionsService, type EmissionActivityPayload } from "@/src/services/e
 import { shipmentService } from "@/src/services/shipmentService";
 import { socketService } from "@/src/services/socketService";
 import { useAuth } from "@/src/hooks/useAuth";
+import { buildLedgerFactorMessage } from "./ledgerFactorMessage";
 import type { EmissionRecord, LedgerEntry, LedgerOverview, Shipment } from "@/src/types/platform";
 
 const ACTIVITY_PRESETS: Record<string, Pick<EmissionActivityPayload, "scope" | "category" | "activityType" | "activityUnit" | "fuelType">> = {
@@ -62,6 +63,7 @@ export function LedgerPage() {
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingActivity, setSavingActivity] = useState(false);
+  const [matchedFactor, setMatchedFactor] = useState<Awaited<ReturnType<typeof emissionsService.matchFactor>> | undefined>(undefined);
   const [importCsv, setImportCsv] = useState("");
   const [importPreview, setImportPreview] = useState<Awaited<ReturnType<typeof emissionsService.previewImport>> | null>(null);
   const [importing, setImporting] = useState(false);
@@ -78,6 +80,8 @@ export function LedgerPage() {
     description: "",
     facilityName: "",
     businessUnit: "",
+    country: "",
+    region: "GLOBAL",
     reportingPeriod: new Date().toISOString().slice(0, 7),
     occurredAt: new Date().toISOString().slice(0, 10),
   });
@@ -110,6 +114,38 @@ export function LedgerPage() {
     ];
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const params = new URLSearchParams({
+      scope: String(activityForm.scope),
+      category: activityForm.category,
+      activityType: activityForm.activityType,
+      activityUnit: activityForm.activityUnit,
+    });
+
+    if (activityForm.factorKey || activityForm.fuelType) params.set("factorKey", String(activityForm.factorKey || activityForm.fuelType));
+    if (activityForm.country) params.set("country", activityForm.country);
+    if (activityForm.region) params.set("region", activityForm.region);
+    if (activityForm.occurredAt) params.set("occurredAt", activityForm.occurredAt);
+
+    setMatchedFactor(undefined);
+
+    const timer = window.setTimeout(() => {
+      emissionsService.matchFactor(`?${params.toString()}`)
+        .then((factor) => {
+          if (!cancelled) setMatchedFactor(factor);
+        })
+        .catch(() => {
+          if (!cancelled) setMatchedFactor(null);
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activityForm.activityType, activityForm.activityUnit, activityForm.category, activityForm.country, activityForm.factorKey, activityForm.fuelType, activityForm.occurredAt, activityForm.region, activityForm.scope]);
 
   const createFromShipment = async () => {
     const shipment = shipments[0];
@@ -308,6 +344,14 @@ export function LedgerPage() {
                 <Input id="fuelType" value={activityForm.fuelType ?? ""} onChange={(event) => setActivityForm((current) => ({ ...current, fuelType: event.target.value }))} placeholder="DIESEL, US, GLOBAL" />
               </div>
               <div className="space-y-2">
+                <Label htmlFor="country">Country</Label>
+                <Input id="country" value={activityForm.country ?? ""} onChange={(event) => setActivityForm((current) => ({ ...current, country: event.target.value }))} placeholder="US, GB, PK" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="region">Region</Label>
+                <Input id="region" value={activityForm.region ?? ""} onChange={(event) => setActivityForm((current) => ({ ...current, region: event.target.value }))} placeholder="GLOBAL, US, EUROPE" />
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="facility">Facility</Label>
                 <Input id="facility" value={activityForm.facilityName ?? ""} onChange={(event) => setActivityForm((current) => ({ ...current, facilityName: event.target.value }))} />
               </div>
@@ -333,7 +377,9 @@ export function LedgerPage() {
                   Record Activity
                 </Button>
               </div>
-              <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 md:col-span-2 xl:col-span-4">This MVP uses sample emission factors. Replace with official factors before production use. CarbonFlow sample factors are placeholders and should not be presented as official DEFRA/EPA/IPCC/GHG Protocol data.</p>
+              <p className={`${matchedFactor && matchedFactor.isSample === false ? "border-emerald-300 bg-emerald-50 text-emerald-800" : matchedFactor === null ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-amber-300 bg-amber-50 text-amber-900"} rounded-md border px-3 py-2 text-xs md:col-span-2 xl:col-span-4`}>
+                {buildLedgerFactorMessage(matchedFactor)}
+              </p>
             </form>
           </CardContent>
         </Card>

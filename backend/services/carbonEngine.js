@@ -87,7 +87,10 @@ const DEFAULT_EMISSION_FACTORS = {
 
 const SAMPLE_FACTOR_CATALOG = [
   { scope: 1, category: "Stationary combustion", activityType: "stationary_fuel", unit: "liter", key: "DIESEL", value: 2.68 },
+  { scope: 1, category: "Stationary combustion", activityType: "stationary_fuel", unit: "liter", key: "PETROL", value: 2.31 },
+  { scope: 1, category: "Stationary combustion", activityType: "stationary_fuel", unit: "liter", key: "GASOLINE", value: 2.31 },
   { scope: 1, category: "Stationary combustion", activityType: "stationary_fuel", unit: "liter", key: "NATURAL_GAS", value: 2.03 },
+  { scope: 1, category: "Mobile combustion", activityType: "mobile_fuel", unit: "liter", key: "DIESEL", value: 2.68 },
   { scope: 1, category: "Mobile combustion", activityType: "mobile_fuel", unit: "liter", key: "PETROL", value: 2.31 },
   { scope: 1, category: "Mobile combustion", activityType: "fleet_distance", unit: "km", key: "DIESEL", value: 0.27 },
   { scope: 1, category: "Fugitive emissions", activityType: "refrigerant_leakage", unit: "kg", key: "REFRIGERANT_R410A", value: 2088 },
@@ -106,8 +109,9 @@ const SAMPLE_FACTOR_CATALOG = [
   name: `${factor.category} - ${factor.key}`,
   factorUnit: `kgCO2e/${factor.unit}`,
   activityUnit: factor.unit,
+  factorKey: factor.key,
   factorValue: factor.value,
-  sourceName: "CarbonFlow sample factors",
+  sourceName: "CarbonFlow Sample Factor",
   sourceYear: 2026,
   region: factor.key === "US" ? "US" : "GLOBAL",
   isSample: true,

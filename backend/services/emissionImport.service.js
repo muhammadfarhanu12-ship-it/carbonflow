@@ -98,6 +98,7 @@ class EmissionImportService {
         activityType: row.activityType,
         activityAmount: Number(row.activityAmount),
         activityUnit: row.activityUnit,
+        factorKey: row.factorKey || row.fuelType || null,
         reportingPeriod: toReportingPeriod(row.reportingPeriodStart, row.reportingPeriodEnd, legacyReportingPeriod),
         reportingPeriodStart: row.reportingPeriodStart || null,
         reportingPeriodEnd: row.reportingPeriodEnd || null,

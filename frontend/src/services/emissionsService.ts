@@ -8,10 +8,13 @@ export interface EmissionActivityPayload {
   activityAmount: number;
   activityUnit: string;
   fuelType?: string;
+  factorKey?: string;
   factorValue?: number;
   description?: string;
   facilityName?: string;
   businessUnit?: string;
+  country?: string;
+  region?: string;
   reportingPeriod?: string;
   reportingPeriodStart?: string | null;
   reportingPeriodEnd?: string | null;
@@ -23,11 +26,15 @@ export interface EmissionFactor {
   scope: 1 | 2 | 3;
   category: string;
   activityType: string;
+  factorKey?: string | null;
+  activityUnit?: string | null;
+  factorValue?: number;
   unit: string;
   value: number;
   factorUnit: string;
   sourceName: string;
   sourceYear: number;
+  country?: string | null;
   region: string;
   isSample: boolean;
 }
@@ -73,6 +80,7 @@ export interface EmissionImportPreview {
 export const emissionsService = {
   getActivities: (params = "") => apiClient.get<PaginatedResponse<EmissionRecord>>(`/emissions${params}`),
   getFactors: (params = "") => apiClient.get<EmissionFactor[]>(`/emissions/factors${params}`),
+  matchFactor: (params = "") => apiClient.get<EmissionFactor | null>(`/emissions/factors/match${params}`),
   createActivity: (payload: EmissionActivityPayload) => apiClient.post<EmissionRecord>("/emissions/activities", payload),
   updateStatus: (id: string, dataStatus: string, notes?: string) => apiClient.patch<EmissionRecord>(`/emissions/${id}/status`, { dataStatus, notes }),
   previewImport: (csv: string) => apiClient.post<EmissionImportPreview>("/emissions/import/preview", { csv }),

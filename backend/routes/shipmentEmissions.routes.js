@@ -9,6 +9,7 @@ const router = express.Router();
 router.use(authenticate);
 
 router.get("/", asyncHandler(controller.listActivities));
+router.get("/factors/match", asyncHandler(controller.matchFactor));
 router.get("/factors", asyncHandler(controller.listFactors));
 router.get("/import/template", requirePermission("records:create"), asyncHandler(controller.downloadTemplate));
 router.post("/import/preview", requirePermission("records:create"), asyncHandler(controller.previewImport));

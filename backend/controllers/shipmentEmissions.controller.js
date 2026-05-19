@@ -42,6 +42,14 @@ exports.listFactors = async (req, res) => sendSuccess(res, {
   data: await EmissionRecordService.listFactors(req.query),
 });
 
+exports.matchFactor = async (req, res) => sendSuccess(res, {
+  message: "Emission factor match fetched successfully",
+  data: await EmissionRecordService.resolveActivityFactor({
+    ...req.query,
+    companyId: req.user.companyId,
+  }),
+});
+
 exports.updateStatus = async (req, res) => {
   const record = await EmissionRecordService.updateStatus(req.user.companyId, req.params.id, req.body.dataStatus, actorFromRequest(req), req.body.notes);
   req.io.emit("emissionRecordStatusChanged", record);

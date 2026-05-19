@@ -7,6 +7,7 @@ const emissionFactorSchema = withBaseSchema({
   scope: { type: Number, enum: [1, 2, 3], required: true, default: 3, index: true },
   category: { type: String, required: true, trim: true },
   activityType: { type: String, required: true, default: "transport", trim: true, index: true },
+  factorKey: { type: String, default: null, trim: true, index: true },
   activityUnit: { type: String, default: null, trim: true, index: true },
   factorValue: { type: Number, default: null, min: 0 },
   value: { type: Number, required: true, min: 0 },
@@ -28,7 +29,7 @@ const emissionFactorSchema = withBaseSchema({
   collection: "emission_factors",
 });
 
-emissionFactorSchema.index({ companyId: 1, scope: 1, category: 1, activityType: 1, activityUnit: 1, country: 1, region: 1, isActive: 1 });
+emissionFactorSchema.index({ companyId: 1, scope: 1, category: 1, activityType: 1, factorKey: 1, activityUnit: 1, country: 1, region: 1, isActive: 1 });
 emissionFactorSchema.index({ scope: 1, activityType: 1, unit: 1, region: 1, isActive: 1 });
 
 module.exports = mongoose.models.EmissionFactor || mongoose.model("EmissionFactor", emissionFactorSchema);

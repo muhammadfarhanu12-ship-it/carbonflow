@@ -100,6 +100,92 @@ describe("enterprise production readiness", () => {
     expect(selected.id).toBe("custom");
   });
 
+  test("activity uses correct matching factor key", () => {
+    const selected = selectBestMatchingFactor([
+      {
+        id: "petrol",
+        scope: 1,
+        category: "Stationary combustion",
+        activityType: "stationary_fuel",
+        factorKey: "PETROL",
+        activityUnit: "liter",
+        sourceYear: 2026,
+        region: "GLOBAL",
+        isActive: true,
+        isSample: true,
+        sourceName: "CarbonFlow Sample Factor",
+      },
+      {
+        id: "diesel",
+        scope: 1,
+        category: "Stationary combustion",
+        activityType: "stationary_fuel",
+        factorKey: "DIESEL",
+        activityUnit: "liter",
+        sourceYear: 2026,
+        region: "GLOBAL",
+        isActive: true,
+        isSample: false,
+        sourceName: "Company fuel factor",
+      },
+    ], {
+      scope: 1,
+      category: "Stationary combustion",
+      activityType: "stationary_fuel",
+      factorKey: "DIESEL",
+      activityUnit: "liter",
+      region: "GLOBAL",
+    });
+
+    expect(selected.id).toBe("diesel");
+  });
+
+  test("resolves activity factor by factor key from active database factors", async () => {
+    const factors = [
+      {
+        id: "petrol",
+        scope: 1,
+        category: "Stationary combustion",
+        activityType: "stationary_fuel",
+        factorKey: "PETROL",
+        activityUnit: "liter",
+        sourceYear: 2026,
+        region: "GLOBAL",
+        isActive: true,
+        isSample: false,
+        sourceName: "Company petrol factor",
+      },
+      {
+        id: "diesel",
+        scope: 1,
+        category: "Stationary combustion",
+        activityType: "stationary_fuel",
+        factorKey: "DIESEL",
+        activityUnit: "liter",
+        sourceYear: 2026,
+        region: "GLOBAL",
+        isActive: true,
+        isSample: false,
+        sourceName: "Company diesel factor",
+      },
+    ];
+    jest.spyOn(EmissionFactor, "find").mockReturnValue({
+      lean: jest.fn().mockResolvedValue(factors),
+    });
+
+    const selected = await EmissionRecordService.resolveActivityFactor({
+      companyId: "company-1",
+      scope: 1,
+      category: "Stationary combustion",
+      activityType: "stationary_fuel",
+      factorKey: "DIESEL",
+      activityUnit: "liter",
+      region: "GLOBAL",
+    });
+
+    expect(selected.id).toBe("diesel");
+  });
+
   test("does not select inactive factors", () => {
     const selected = selectBestMatchingFactor([
       {

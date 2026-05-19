@@ -32,8 +32,115 @@ async function ensureSeedAdmin() {
   });
 }
 
+const SAMPLE_FACTOR_SOURCE = "CarbonFlow Sample Factor";
+
+const DEFAULT_SAMPLE_EMISSION_FACTORS = [
+  {
+    name: "Sample stationary combustion diesel",
+    scope: 1,
+    category: "Stationary combustion",
+    activityType: "stationary_fuel",
+    factorKey: "DIESEL",
+    activityUnit: "liter",
+    factorValue: 2.68,
+    factorUnit: "kgCO2e/liter",
+  },
+  {
+    name: "Sample stationary combustion petrol",
+    scope: 1,
+    category: "Stationary combustion",
+    activityType: "stationary_fuel",
+    factorKey: "PETROL",
+    activityUnit: "liter",
+    factorValue: 2.31,
+    factorUnit: "kgCO2e/liter",
+  },
+  {
+    name: "Sample stationary combustion gasoline",
+    scope: 1,
+    category: "Stationary combustion",
+    activityType: "stationary_fuel",
+    factorKey: "GASOLINE",
+    activityUnit: "liter",
+    factorValue: 2.31,
+    factorUnit: "kgCO2e/liter",
+  },
+  {
+    name: "Sample mobile combustion diesel",
+    scope: 1,
+    category: "Mobile combustion",
+    activityType: "mobile_fuel",
+    factorKey: "DIESEL",
+    activityUnit: "liter",
+    factorValue: 2.68,
+    factorUnit: "kgCO2e/liter",
+  },
+  {
+    name: "Sample purchased electricity",
+    scope: 2,
+    category: "Purchased electricity",
+    activityType: "electricity",
+    factorKey: "GLOBAL",
+    activityUnit: "kWh",
+    factorValue: 0.42,
+    factorUnit: "kgCO2e/kWh",
+  },
+  {
+    name: "Sample business travel air",
+    scope: 3,
+    category: "Business travel",
+    activityType: "business_travel_air",
+    factorKey: "BUSINESS_TRAVEL_AIR_KM",
+    activityUnit: "km",
+    factorValue: 0.156,
+    factorUnit: "kgCO2e/km",
+  },
+  {
+    name: "Sample waste landfill",
+    scope: 3,
+    category: "Waste generated in operations",
+    activityType: "waste_landfill",
+    factorKey: "WASTE_LANDFILL_KG",
+    activityUnit: "kg",
+    factorValue: 0.45,
+    factorUnit: "kgCO2e/kg",
+  },
+].map((factor) => ({
+  ...factor,
+  value: factor.factorValue,
+  unit: factor.activityUnit,
+  source: SAMPLE_FACTOR_SOURCE,
+  sourceName: SAMPLE_FACTOR_SOURCE,
+  sourceYear: 2026,
+  country: null,
+  region: "GLOBAL",
+  version: "sample-2026.1",
+  effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
+  effectiveTo: null,
+  isSample: true,
+  isActive: true,
+}));
+
+async function ensureDefaultSampleEmissionFactors() {
+  await Promise.all(DEFAULT_SAMPLE_EMISSION_FACTORS.map((factor) => EmissionFactor.updateOne(
+    {
+      companyId: null,
+      scope: factor.scope,
+      category: factor.category,
+      activityType: factor.activityType,
+      factorKey: factor.factorKey,
+      activityUnit: factor.activityUnit,
+      sourceName: factor.sourceName,
+      sourceYear: factor.sourceYear,
+    },
+    { $setOnInsert: factor },
+    { upsert: true },
+  )));
+}
+
 async function seedDatabase() {
   await ensureSeedAdmin();
+  await ensureDefaultSampleEmissionFactors();
 
   const count = await Company.countDocuments();
   if (count > 0) return;
