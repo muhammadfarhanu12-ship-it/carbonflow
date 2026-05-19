@@ -8,6 +8,8 @@ const DEFAULT_EMISSION_FACTORS = {
       GASOLINE: 2.31,
       NATURAL_GAS: 2.03,
       LPG: 1.51,
+      COAL_KG: 2.42,
+      FUEL_OIL: 3.11,
     },
     fleetKgPerKm: {
       DIESEL: 0.27,
@@ -66,8 +68,50 @@ const DEFAULT_EMISSION_FACTORS = {
       KR: 17,
       SG: 10,
     },
+    activityKgPerUnit: {
+      BUSINESS_TRAVEL_AIR_KM: 0.156,
+      BUSINESS_TRAVEL_RAIL_KM: 0.035,
+      BUSINESS_TRAVEL_CAR_KM: 0.192,
+      EMPLOYEE_COMMUTING_CAR_KM: 0.171,
+      EMPLOYEE_COMMUTING_TRANSIT_KM: 0.055,
+      PURCHASED_GOODS_USD: 0.35,
+      CAPITAL_GOODS_USD: 0.28,
+      WASTE_LANDFILL_KG: 0.45,
+      WASTE_RECYCLED_KG: 0.035,
+      UPSTREAM_TRANSPORTATION_TON_KM: 0.098,
+      DOWNSTREAM_TRANSPORTATION_TON_KM: 0.098,
+      FUEL_ENERGY_RELATED_KWH: 0.08,
+    },
   },
 };
+
+const SAMPLE_FACTOR_CATALOG = [
+  { scope: 1, category: "Stationary combustion", activityType: "stationary_fuel", unit: "liter", key: "DIESEL", value: 2.68 },
+  { scope: 1, category: "Stationary combustion", activityType: "stationary_fuel", unit: "liter", key: "NATURAL_GAS", value: 2.03 },
+  { scope: 1, category: "Mobile combustion", activityType: "mobile_fuel", unit: "liter", key: "PETROL", value: 2.31 },
+  { scope: 1, category: "Mobile combustion", activityType: "fleet_distance", unit: "km", key: "DIESEL", value: 0.27 },
+  { scope: 1, category: "Fugitive emissions", activityType: "refrigerant_leakage", unit: "kg", key: "REFRIGERANT_R410A", value: 2088 },
+  { scope: 2, category: "Purchased electricity", activityType: "electricity", unit: "kWh", key: "GLOBAL", value: 0.42 },
+  { scope: 2, category: "Purchased electricity", activityType: "electricity", unit: "kWh", key: "US", value: 0.385 },
+  { scope: 2, category: "Purchased heating/cooling/steam", activityType: "purchased_heat", unit: "kWh", key: "GLOBAL", value: 0.19 },
+  { scope: 3, category: "Business travel", activityType: "business_travel_air", unit: "km", key: "BUSINESS_TRAVEL_AIR_KM", value: 0.156 },
+  { scope: 3, category: "Employee commuting", activityType: "employee_commuting_car", unit: "km", key: "EMPLOYEE_COMMUTING_CAR_KM", value: 0.171 },
+  { scope: 3, category: "Purchased goods and services", activityType: "purchased_goods_services", unit: "USD", key: "PURCHASED_GOODS_USD", value: 0.35 },
+  { scope: 3, category: "Waste generated in operations", activityType: "waste_landfill", unit: "kg", key: "WASTE_LANDFILL_KG", value: 0.45 },
+  { scope: 3, category: "Upstream transportation and distribution", activityType: "upstream_transportation", unit: "ton-km", key: "UPSTREAM_TRANSPORTATION_TON_KM", value: 0.098 },
+  { scope: 3, category: "Downstream transportation and distribution", activityType: "downstream_transportation", unit: "ton-km", key: "DOWNSTREAM_TRANSPORTATION_TON_KM", value: 0.098 },
+  { scope: 3, category: "Fuel and energy-related activities", activityType: "fuel_energy_related", unit: "kWh", key: "FUEL_ENERGY_RELATED_KWH", value: 0.08 },
+].map((factor) => ({
+  ...factor,
+  name: `${factor.category} - ${factor.key}`,
+  factorUnit: `kgCO2e/${factor.unit}`,
+  activityUnit: factor.unit,
+  factorValue: factor.value,
+  sourceName: "CarbonFlow sample factors",
+  sourceYear: 2026,
+  region: factor.key === "US" ? "US" : "GLOBAL",
+  isSample: true,
+}));
 
 function round(value, digits = 4) {
   return Number(Number(value || 0).toFixed(digits));
@@ -110,6 +154,10 @@ function resolveFactor(overrides, fallbackMap, key, defaultKey = "GLOBAL") {
 
 function toTonnesFromKg(value) {
   return round(Number(value || 0) / 1000);
+}
+
+function toKgFromTonnes(value) {
+  return round(Number(value || 0) * 1000, 4);
 }
 
 function calculateShipmentEmissions(input = {}, overrides = {}) {
@@ -284,13 +332,62 @@ function calculateScope3(input = {}, overrides = {}) {
   };
 }
 
+function getSampleFactors() {
+  return SAMPLE_FACTOR_CATALOG.map((factor) => ({ ...factor }));
+}
+
+function resolveSampleFactor({ scope, activityType, unit, region, fuelType }) {
+  const normalizedActivityType = String(activityType || "").trim().toLowerCase();
+  const normalizedUnit = String(unit || "").trim().toLowerCase();
+  const normalizedRegion = normalizeKey(region || "GLOBAL");
+  const normalizedFuelType = normalizeKey(fuelType || "");
+
+  return SAMPLE_FACTOR_CATALOG.find((factor) => (
+    Number(factor.scope) === Number(scope)
+    && factor.activityType === normalizedActivityType
+    && String(factor.unit).toLowerCase() === normalizedUnit
+    && (normalizeKey(factor.key) === normalizedFuelType || normalizeKey(factor.region) === normalizedRegion)
+  )) || SAMPLE_FACTOR_CATALOG.find((factor) => (
+    Number(factor.scope) === Number(scope)
+    && factor.activityType === normalizedActivityType
+    && String(factor.unit).toLowerCase() === normalizedUnit
+    && normalizeKey(factor.region) === "GLOBAL"
+  )) || null;
+}
+
+function calculateActivityEmission(input = {}, factor = null) {
+  const amount = Math.max(0, Number(input.activityAmount ?? input.amount ?? 0));
+  const factorValue = Math.max(0, Number(factor?.factorValue ?? factor?.value ?? input.factorValue ?? 0));
+  const kgCo2e = amount * factorValue;
+  const tonnes = toTonnesFromKg(kgCo2e);
+
+  return {
+    activityAmount: round(amount, 4),
+    activityUnit: input.activityUnit || input.unit || factor?.activityUnit || factor?.unit || null,
+    factorValue: round(factorValue, 6),
+    factorUnit: factor?.factorUnit || input.factorUnit || "kgCO2e/unit",
+    factorSource: factor?.sourceName || factor?.source || input.factorSource || "CarbonFlow sample factors",
+    factorSourceYear: factor?.sourceYear || input.factorSourceYear || 2026,
+    factorRegion: factor?.region || input.region || "GLOBAL",
+    factorCountry: factor?.country || input.country || null,
+    factorIsSample: factor?.isSample ?? true,
+    emissionsKgCo2e: round(kgCo2e, 4),
+    emissionsTCo2e: tonnes,
+    amountTonnes: tonnes,
+  };
+}
+
 module.exports = {
   DEFAULT_EMISSION_FACTORS,
+  getSampleFactors,
+  resolveSampleFactor,
   resolveTransportMode,
   calculateShipmentEmissions,
   calculateScope1,
   calculateScope2,
   calculateScope3,
+  calculateActivityEmission,
   calculateSupplierRisk,
   round,
+  toKgFromTonnes,
 };

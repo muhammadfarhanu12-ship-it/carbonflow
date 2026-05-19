@@ -44,6 +44,12 @@ router.delete("/users/:id", requireAdminRole("superadmin"), deleteUserValidator,
 router.get("/analytics", analyticsValidator, validateRequest, catchAsync(adminController.getAnalytics));
 router.get("/carbon-data", carbonDataValidator, validateRequest, catchAsync(adminController.getCarbonData));
 
+router.get("/emission-factors", requireAdminRole("owner", "superadmin", "admin"), catchAsync(adminController.getEmissionFactors));
+router.post("/emission-factors", requireAdminRole("owner", "superadmin", "admin"), catchAsync(adminController.createEmissionFactor));
+router.put("/emission-factors/:id", requireAdminRole("owner", "superadmin", "admin"), catchAsync(adminController.updateEmissionFactor));
+router.patch("/emission-factors/:id", requireAdminRole("owner", "superadmin", "admin"), catchAsync(adminController.updateEmissionFactor));
+router.patch("/emission-factors/:id/deactivate", requireAdminRole("owner", "superadmin", "admin"), catchAsync(adminController.deactivateEmissionFactor));
+
 router.get("/reports", reportsValidator, validateRequest, catchAsync(adminController.getReports));
 router.patch("/reports/:id", updateReportValidator, validateRequest, catchAsync(adminController.updateReport));
 router.delete("/reports/:id", requireAdminRole("superadmin"), reportIdValidator, validateRequest, catchAsync(adminController.deleteReport));

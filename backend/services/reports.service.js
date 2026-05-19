@@ -1,8 +1,13 @@
-const { Report, Shipment, Supplier, Setting, Transaction } = require("../models");
+const { Report, Shipment, Supplier, Setting, Transaction, EmissionRecord } = require("../models");
 const BaseService = require("./base.service");
 const PDFDocument = require("pdfkit");
 const DashboardService = require("./dashboard.service");
 const AuditService = require("./audit.service");
+
+function round(value, precision = 2) {
+  const factor = 10 ** precision;
+  return Math.round((Number(value || 0) + Number.EPSILON) * factor) / factor;
+}
 
 class ReportsService extends BaseService {
   static list(query = {}, companyId) {
@@ -11,25 +16,46 @@ class ReportsService extends BaseService {
   }
 
   static async generate(payload, companyId, actor = null) {
+    const type = String(payload.type || "").toUpperCase();
+    const format = String(payload.format || "PDF").toUpperCase();
+    const allowedTypes = ["ESG", "COMPLIANCE", "ANALYTICS", "CUSTOM"];
+    const allowedFormats = ["CSV", "PDF"];
+
+    if (!payload.name || !allowedTypes.includes(type) || !allowedFormats.includes(format)) {
+      const error = new Error("Report name, valid type, and valid format are required");
+      error.status = 422;
+      throw error;
+    }
+
+    const metadata = {
+      ...(payload.metadata || {}),
+      approvedOnly: payload.metadata?.includeUnapproved === true ? false : payload.metadata?.approvedOnly !== false,
+    };
+    if (metadata.approvedOnly === false) {
+      metadata.warning = "This report includes unapproved emission records and is not enterprise-assurance ready.";
+    }
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const report = await Report.create({
       companyId,
       name: payload.name,
-      type: payload.type,
-      format: payload.format,
+      type,
+      format,
       status: "READY",
       generatedAt: new Date(),
-      downloadUrl: `/api/reports/download/${timestamp}.${payload.format.toLowerCase()}`,
-      metadata: payload.metadata || {},
+      downloadUrl: `/api/reports/download/${timestamp}.${format.toLowerCase()}`,
+      metadata,
     });
 
     await AuditService.log({
       companyId,
       userId: actor?.id || null,
       userEmail: actor?.email || null,
-      action: "report.generated",
+      action: "report_generated",
       entityType: "Report",
       entityId: report.id,
+      ipAddress: actor?.ipAddress || null,
+      userAgent: actor?.userAgent || null,
       details: {
         type: report.type,
         format: report.format,
@@ -54,16 +80,93 @@ class ReportsService extends BaseService {
     return report;
   }
 
-  static async buildDataset(companyId) {
-    const [dashboard, shipments, suppliers, settings, offsetTransactions] = await Promise.all([
+  static buildDashboardForReport(dashboard, records) {
+    const scopeSummary = records.reduce((accumulator, record) => {
+      const amount = Number(record.emissionsTCo2e ?? record.amountTonnes ?? 0);
+      accumulator.totalEmissions += amount;
+      if (record.scope === 1) accumulator.scope1 += amount;
+      if (record.scope === 2) accumulator.scope2 += amount;
+      if (record.scope === 3) accumulator.scope3 += amount;
+      return accumulator;
+    }, { totalEmissions: 0, scope1: 0, scope2: 0, scope3: 0 });
+
+    const categoryMap = new Map();
+    const monthlyMap = new Map();
+    records.forEach((record) => {
+      const name = record.category || "Uncategorized";
+      const bucket = categoryMap.get(name) || { name, value: 0, scope1: 0, scope2: 0, scope3: 0 };
+      const amount = Number(record.emissionsTCo2e ?? record.amountTonnes ?? 0);
+      bucket.value = round(bucket.value + amount);
+      if (record.scope === 1) bucket.scope1 = round(bucket.scope1 + amount);
+      if (record.scope === 2) bucket.scope2 = round(bucket.scope2 + amount);
+      if (record.scope === 3) bucket.scope3 = round(bucket.scope3 + amount);
+      categoryMap.set(name, bucket);
+
+      const occurredAt = new Date(record.occurredAt || Date.now());
+      const year = record.periodYear || occurredAt.getUTCFullYear();
+      const month = record.periodMonth || occurredAt.getUTCMonth() + 1;
+      const key = `${year}-${String(month).padStart(2, "0")}`;
+      const monthName = new Date(Date.UTC(year, month - 1, 1)).toLocaleString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" });
+      const monthlyBucket = monthlyMap.get(key) || { name: monthName, scope1: 0, scope2: 0, scope3: 0, emissions: 0, cost: 0 };
+      monthlyBucket.emissions = round(monthlyBucket.emissions + amount);
+      if (record.scope === 1) monthlyBucket.scope1 = round(monthlyBucket.scope1 + amount);
+      if (record.scope === 2) monthlyBucket.scope2 = round(monthlyBucket.scope2 + amount);
+      if (record.scope === 3) monthlyBucket.scope3 = round(monthlyBucket.scope3 + amount);
+      monthlyMap.set(key, monthlyBucket);
+    });
+    const monthly = Array.from(monthlyMap.entries())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([, value]) => value);
+
+    return {
+      ...dashboard,
+      summary: {
+        ...dashboard.summary,
+        totalEmissions: round(scopeSummary.totalEmissions),
+        scope1: round(scopeSummary.scope1),
+        scope2: round(scopeSummary.scope2),
+        scope3: round(scopeSummary.scope3),
+        activitiesRecorded: records.length,
+        totalRecords: records.length,
+        approvedRecords: records.filter((record) => record.dataStatus === "approved").length,
+        unapprovedRecords: records.filter((record) => record.dataStatus !== "approved").length,
+      },
+      scopeBreakdown: [
+        { name: "Scope 1", value: round(scopeSummary.scope1), percentage: scopeSummary.totalEmissions ? round((scopeSummary.scope1 / scopeSummary.totalEmissions) * 100, 2) : 0 },
+        { name: "Scope 2", value: round(scopeSummary.scope2), percentage: scopeSummary.totalEmissions ? round((scopeSummary.scope2 / scopeSummary.totalEmissions) * 100, 2) : 0 },
+        { name: "Scope 3", value: round(scopeSummary.scope3), percentage: scopeSummary.totalEmissions ? round((scopeSummary.scope3 / scopeSummary.totalEmissions) * 100, 2) : 0 },
+      ],
+      categories: Array.from(categoryMap.values()).sort((left, right) => right.value - left.value).slice(0, 8),
+      monthly,
+      costVsEmissions: monthly.map((entry) => ({
+        name: entry.name,
+        cost: entry.cost,
+        emissions: entry.emissions,
+      })),
+    };
+  }
+
+  static async buildDataset(companyId, metadata = {}) {
+    const approvedOnly = metadata.includeUnapproved === true ? false : metadata.approvedOnly !== false;
+    const recordFilter = approvedOnly ? { companyId, dataStatus: "approved" } : { companyId };
+    const [dashboard, shipments, suppliers, settings, offsetTransactions, emissionRecords] = await Promise.all([
       DashboardService.getMetrics(companyId),
       Shipment.find({ companyId }).sort({ createdAt: -1 }).limit(10),
       Supplier.find({ companyId }).sort({ createdAt: -1 }).limit(10),
       Setting.findOne({ companyId }),
       Transaction.find({ companyId, status: "COMPLETED" }).sort({ retiredAt: -1 }).limit(10),
+      EmissionRecord.find(recordFilter).sort({ occurredAt: -1 }).limit(100).lean(),
     ]);
 
-    return { dashboard, shipments, suppliers, settings, offsetTransactions };
+    return {
+      dashboard: this.buildDashboardForReport(dashboard, emissionRecords),
+      shipments,
+      suppliers,
+      settings,
+      offsetTransactions,
+      emissionRecords,
+      recordSelection: approvedOnly ? "approved_only" : "all_records",
+    };
   }
 
   static buildCsv(report, dataset) {
@@ -73,6 +176,9 @@ class ReportsService extends BaseService {
       ["Format", report.format],
       ["Generated At", report.generatedAt.toISOString()],
       ["Company", dataset.settings?.companyName || "CarbonFlow"],
+      ["Reporting Period", report.metadata?.period || report.metadata?.reportingPeriod || "All available records"],
+      ["Record Selection", dataset.recordSelection === "approved_only" ? "Approved records only" : "All records"],
+      ...(dataset.recordSelection === "approved_only" ? [] : [["Warning", "This report includes unapproved records and should not be used for final enterprise reporting without review."]]),
       ["Total Emissions (tCO2e)", dataset.dashboard.summary.totalEmissions],
       ["Scope 1 (tCO2e)", dataset.dashboard.summary.scope1],
       ["Scope 2 (tCO2e)", dataset.dashboard.summary.scope2],
@@ -80,6 +186,17 @@ class ReportsService extends BaseService {
       ["Total Logistics Cost (USD)", dataset.dashboard.summary.totalCost],
       ["High Risk Suppliers", dataset.dashboard.summary.highRiskSuppliers],
       ["Offsets Retired", dataset.dashboard.summary.totalOffsets],
+      ["Data Completeness (%)", dataset.dashboard.summary.dataCompletenessPct],
+      ["Activities Recorded", dataset.dashboard.summary.activitiesRecorded],
+      ["Reports Generated", dataset.dashboard.summary.reportsGenerated],
+      [],
+      ["Scope Split"],
+      ["Scope", "tCO2e", "Percent"],
+      ...dataset.dashboard.scopeBreakdown.map((item) => [item.name, item.value, item.percentage]),
+      [],
+      ["Category Breakdown"],
+      ["Category", "Scope 1", "Scope 2", "Scope 3", "Total tCO2e"],
+      ...dataset.dashboard.categories.map((item) => [item.name, item.scope1, item.scope2, item.scope3, item.value]),
       [],
       ["Monthly Trend"],
       ["Month", "Scope 1", "Scope 2", "Scope 3", "Emissions", "Cost"],
@@ -91,6 +208,40 @@ class ReportsService extends BaseService {
         month.emissions,
         month.cost,
       ]),
+      [],
+      ["Methodology"],
+      ["Formula", "emissions = activity data x emission factor"],
+      ["Output Units", "kgCO2e and tCO2e"],
+      ["Factor Note", "Records flagged as sample factors are MVP placeholders and should be replaced with official DEFRA/EPA/IPCC/GHG Protocol factors before formal assurance."],
+      ["Sample Factor Disclaimer", "This MVP uses sample emission factors. Replace with official factors before production use."],
+      ["Data Quality", `${dataset.dashboard.dataQuality.completedSignals}/${dataset.dashboard.dataQuality.requiredSignals} completeness signals available; ${dataset.dashboard.dataQuality.sampleFactorRecords} records use sample factors.`],
+      [],
+      ["Emission Activity Calculation Detail"],
+      ["Date", "Reporting Period", "Status", "Scope", "Category", "Activity Amount", "Activity Unit", "Emission Factor", "Factor Unit", "Factor Source", "Factor Year", "Factor Region", "Factor Country", "Sample Factor", "Formula", "kgCO2e", "tCO2e"],
+      ...dataset.emissionRecords.map((record) => [
+        record.occurredAt ? new Date(record.occurredAt).toISOString() : "",
+        record.reportingPeriod || `${record.periodYear || ""}-${String(record.periodMonth || "").padStart(2, "0")}`,
+        record.dataStatus || "draft",
+        `Scope ${record.scope}`,
+        record.category,
+        record.activityAmount ?? record.activityData?.electricityKwh ?? record.activityData?.tonKm ?? "",
+        record.activityUnit || record.factorUnit || "",
+        record.factorValue,
+        record.factorUnit,
+        record.factorSource || "CarbonFlow sample factors",
+        record.factorSourceYear || "",
+        record.factorRegion || record.metadata?.region || "",
+        record.factorCountry || "",
+        record.factorIsSample !== false ? "Yes" : "No",
+        record.activityData?.calculationFormula || "emissions = activity data x emission factor",
+        record.emissionsKgCo2e ?? Number(record.amountTonnes || 0) * 1000,
+        record.emissionsTCo2e ?? record.amountTonnes,
+      ]),
+      [],
+      ["Reduction Recommendations"],
+      ["1", "Prioritize the top emitting categories shown in the category breakdown."],
+      ["2", "Replace sample factors with region and supplier-specific official factors."],
+      ["3", "Collect facility/business-unit data for higher quality enterprise reporting."],
       [],
       ["Recent Shipments"],
       ["Reference", "Origin", "Destination", "Mode", "Carrier", "Emissions", "Status"],
@@ -144,6 +295,12 @@ class ReportsService extends BaseService {
       doc.fillColor("#111827").fontSize(14).text("Executive Summary");
       doc.fontSize(11);
       doc.text(`Company: ${dataset.settings?.companyName || "CarbonFlow"}`);
+      doc.text(`Reporting period: ${report.metadata?.period || report.metadata?.reportingPeriod || "All available records"}`);
+      doc.text(`Record selection: ${dataset.recordSelection === "approved_only" ? "Approved records only" : "All records"}`);
+      if (dataset.recordSelection !== "approved_only") {
+        doc.fillColor("#92400e").text("Warning: this report includes unapproved records and should not be used for final enterprise reporting without review.");
+        doc.fillColor("#111827");
+      }
       doc.text(`Total emissions: ${dataset.dashboard.summary.totalEmissions} tCO2e`);
       doc.text(`Scope 1: ${dataset.dashboard.summary.scope1} tCO2e`);
       doc.text(`Scope 2: ${dataset.dashboard.summary.scope2} tCO2e`);
@@ -151,6 +308,20 @@ class ReportsService extends BaseService {
       doc.text(`Total logistics cost: $${dataset.dashboard.summary.totalCost}`);
       doc.text(`High risk suppliers: ${dataset.dashboard.summary.highRiskSuppliers}`);
       doc.text(`Offsets retired: ${dataset.dashboard.summary.totalOffsets}`);
+      doc.text(`Data completeness: ${dataset.dashboard.summary.dataCompletenessPct || 0}%`);
+      doc.text(`Activities recorded: ${dataset.dashboard.summary.activitiesRecorded || 0}`);
+      doc.moveDown();
+      doc.fontSize(14).text("Scope Breakdown");
+      doc.fontSize(10);
+      dataset.dashboard.scopeBreakdown.forEach((item) => {
+        doc.text(`${item.name}: ${item.value} tCO2e (${item.percentage}%)`);
+      });
+      doc.moveDown();
+      doc.fontSize(14).text("Category Breakdown");
+      doc.fontSize(10);
+      dataset.dashboard.categories.forEach((item) => {
+        doc.text(`${item.name}: ${item.value} tCO2e | S1 ${item.scope1} | S2 ${item.scope2} | S3 ${item.scope3}`);
+      });
       doc.moveDown();
       doc.fontSize(14).text("Monthly Trend");
       doc.fontSize(10);
@@ -175,6 +346,34 @@ class ReportsService extends BaseService {
       dataset.offsetTransactions.forEach((transaction) => {
         doc.text(`${transaction.metadata?.projectName || transaction.projectId} | ${transaction.credits} credits | $${transaction.totalCostUsd || transaction.total}`);
       });
+      doc.moveDown();
+      doc.fontSize(14).text("Methodology");
+      doc.fontSize(10);
+      doc.text("Calculations follow: emissions = activity data x emission factor. Results are normalized to kgCO2e and tCO2e.");
+      doc.text("Scope 1 covers direct operations, Scope 2 covers purchased energy, and Scope 3 covers value-chain activity including shipments, suppliers, travel, commuting, purchased goods, waste, and transport categories when recorded.");
+      doc.moveDown();
+      doc.fontSize(14).text("Emission Factor Notes");
+      doc.fontSize(10);
+      doc.text("CarbonFlow sample factors are MVP placeholders. Replace them with official DEFRA, EPA, IPCC, GHG Protocol, grid, supplier, or assured internal factors before formal reporting.");
+      doc.text("This MVP uses sample emission factors. Replace with official factors before production use.");
+      doc.moveDown();
+      doc.fontSize(14).text("Data Quality Notes");
+      doc.fontSize(10);
+      doc.text(`Completeness status: ${dataset.dashboard.dataQuality.status}. Sample factor records: ${dataset.dashboard.dataQuality.sampleFactorRecords}. Missing factor records: ${dataset.dashboard.dataQuality.missingFactorRecords}.`);
+      doc.moveDown();
+      doc.fontSize(14).text("Emission Activity Calculation Detail");
+      doc.fontSize(8);
+      dataset.emissionRecords.slice(0, 25).forEach((record) => {
+        const kgCo2e = record.emissionsKgCo2e ?? Number(record.amountTonnes || 0) * 1000;
+        const tCo2e = record.emissionsTCo2e ?? record.amountTonnes;
+        doc.text(`${record.reportingPeriod || ""} | ${record.dataStatus || "draft"} | Scope ${record.scope} | ${record.category} | Activity ${record.activityAmount ?? ""} ${record.activityUnit || ""} | Factor ${record.factorValue || 0} ${record.factorUnit || ""} | Source ${record.factorSource || "CarbonFlow sample factors"} ${record.factorSourceYear || ""} ${record.factorRegion || ""} | Sample ${record.factorIsSample !== false ? "Yes" : "No"} | kgCO2e ${kgCo2e} | tCO2e ${tCo2e}`);
+      });
+      doc.moveDown();
+      doc.fontSize(14).text("Reduction Recommendations");
+      doc.fontSize(10);
+      doc.text("1. Prioritize abatement in the highest emitting categories and facilities.");
+      doc.text("2. Collect supplier and facility-specific activity data to improve completeness.");
+      doc.text("3. Replace sample factors with official, region-specific factors and document source years.");
 
       doc.end();
     });
@@ -182,7 +381,7 @@ class ReportsService extends BaseService {
 
   static async buildDownload(fileName, companyId) {
     const report = await this.getByFileName(fileName, companyId);
-    const dataset = await this.buildDataset(companyId);
+    const dataset = await this.buildDataset(companyId, report.metadata || {});
 
     if (report.format === "CSV") {
       return {

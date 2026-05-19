@@ -1,4 +1,4 @@
-export type UserRole = "SUPERADMIN" | "ADMIN" | "MANAGER" | "ANALYST" | "USER";
+export type UserRole = "SUPERADMIN" | "ADMIN" | "MANAGER" | "ANALYST" | "USER" | "OWNER" | "DATA_ENTRY" | "VIEWER" | "AUDITOR";
 export type SupplierRiskLevel = "LOW" | "MEDIUM" | "HIGH";
 export type SupplierInsightType = "warning" | "info";
 export type SupplierBenchmarkComparison = "ABOVE_AVERAGE" | "AT_AVERAGE" | "BELOW_AVERAGE" | "UNKNOWN";
@@ -174,9 +174,30 @@ export interface EmissionRecord {
   supplierName?: string | null;
   description?: string | null;
   amountTonnes: number;
+  emissionsKgCo2e?: number;
+  emissionsTCo2e?: number;
   costUsd: number;
   factorValue: number;
   factorUnit?: string | null;
+  factorSource?: string | null;
+  factorSourceYear?: number | null;
+  factorRegion?: string | null;
+  factorCountry?: string | null;
+  factorIsSample?: boolean;
+  activityAmount?: number;
+  activityUnit?: string | null;
+  reportingPeriod?: string | null;
+  dataStatus?: "draft" | "submitted" | "reviewed" | "approved" | "rejected" | "needs_correction";
+  submittedBy?: string | null;
+  submittedAt?: string | null;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
+  approvedBy?: string | null;
+  approvedAt?: string | null;
+  rejectedBy?: string | null;
+  rejectedAt?: string | null;
+  correctionNotes?: string | null;
+  approvalNotes?: string | null;
   activityData?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   occurredAt: string;
@@ -357,6 +378,22 @@ export interface ReportItem {
   downloadUrl: string;
 }
 
+export interface AuditLogItem {
+  id: string;
+  companyId?: string | null;
+  userId?: string | null;
+  userEmail?: string | null;
+  action: string;
+  entityType?: string | null;
+  entityId?: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  oldValue?: Record<string, unknown> | null;
+  newValue?: Record<string, unknown> | null;
+  details?: Record<string, unknown> | null;
+  createdAt: string;
+}
+
 export interface IntegrationStatus {
   name: string;
   status: string;
@@ -528,6 +565,20 @@ export interface DashboardSummary {
   averageSupplierScore: number;
   totalSpend: number;
   totalCarbonTax: number;
+  dataCompletenessPct?: number;
+  activitiesRecorded?: number;
+  totalRecords?: number;
+  draftRecords?: number;
+  submittedRecords?: number;
+  reviewedRecords?: number;
+  approvedRecords?: number;
+  rejectedRecords?: number;
+  needsCorrectionRecords?: number;
+  unapprovedRecords?: number;
+  missingFactorCount?: number;
+  sampleFactorUsageCount?: number;
+  reportsGenerated?: number;
+  reportStatus?: string;
 }
 
 export interface DashboardMonthlyMetric {
@@ -550,9 +601,55 @@ export interface DashboardTransportModeMetric {
   value: number;
 }
 
+export interface DashboardScopeBreakdownMetric {
+  name: string;
+  value: number;
+  percentage: number;
+}
+
+export interface DashboardCategoryMetric {
+  name: string;
+  value: number;
+  scope1: number;
+  scope2: number;
+  scope3: number;
+}
+
+export interface DashboardFacilityMetric {
+  name: string;
+  value: number;
+}
+
+export interface DashboardDataQuality {
+  completenessPct: number;
+  requiredSignals: number;
+  completedSignals: number;
+  sampleFactorRecords: number;
+  missingFactorRecords: number;
+  draftRecords?: number;
+  submittedRecords?: number;
+  reviewedRecords?: number;
+  approvedRecords?: number;
+  rejectedRecords?: number;
+  needsCorrectionRecords?: number;
+  unapprovedRecords?: number;
+  status: "READY" | "PARTIAL" | "NEEDS_DATA";
+}
+
+export interface DashboardReportStatus {
+  generatedCount: number;
+  latestStatus: string;
+  latestGeneratedAt: string | null;
+}
+
 export interface DashboardData {
   summary: DashboardSummary;
   monthly: DashboardMonthlyMetric[];
   costVsEmissions: DashboardCostVsEmissionsMetric[];
   transportModes: DashboardTransportModeMetric[];
+  scopeBreakdown: DashboardScopeBreakdownMetric[];
+  categories: DashboardCategoryMetric[];
+  facilities: DashboardFacilityMetric[];
+  dataQuality: DashboardDataQuality;
+  reportStatus: DashboardReportStatus;
 }

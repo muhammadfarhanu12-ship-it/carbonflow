@@ -10,6 +10,7 @@ const {
   User,
 } = require("../../../models");
 const ApiError = require("../../../utils/ApiError");
+const EmissionFactorService = require("../../../services/emissionFactor.service");
 const { getPagination, formatPaginatedResponse } = require("../../../utils/pagination");
 const { buildSearchFilter } = require("../../../models/helpers/model.utils");
 
@@ -413,6 +414,22 @@ class AdminService {
     });
   }
 
+  static listEmissionFactors(query = {}) {
+    return EmissionFactorService.list(query);
+  }
+
+  static createEmissionFactor(payload, admin) {
+    return EmissionFactorService.create(payload, admin);
+  }
+
+  static updateEmissionFactor(id, payload, admin) {
+    return EmissionFactorService.update(id, payload, admin);
+  }
+
+  static deactivateEmissionFactor(id, admin) {
+    return EmissionFactorService.deactivate(id, admin);
+  }
+
   static async listReports(query = {}) {
     const { page, pageSize, offset, limit } = getPagination(query);
     const filter = {
@@ -550,10 +567,16 @@ class AdminService {
           { category: config.category },
           {
             name: config.name,
+            scope: 3,
             category: config.category,
+            activityType: key === "air" ? "business_travel_air" : key === "ocean" ? "downstream_transportation" : "upstream_transportation",
             value: Number(payload.emissionFactors[key]),
             unit: "tCO2e/ton-km",
+            factorUnit: "tCO2e/ton-km",
             source: "Admin settings update",
+            sourceName: "Admin settings update",
+            sourceYear: new Date().getUTCFullYear(),
+            isSample: false,
             isActive: true,
           },
           {

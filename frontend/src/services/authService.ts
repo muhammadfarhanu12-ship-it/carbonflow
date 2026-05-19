@@ -47,7 +47,7 @@ type BackendAuthPayload = {
 class AuthService {
   private normalizeUser(user: BackendAuthUser): SessionUser {
     const normalizedRole = String(user.role || "ANALYST").toUpperCase();
-    const role = (normalizedRole === "USER" ? "ANALYST" : normalizedRole) as SessionUser["role"];
+    const role = normalizedRole as SessionUser["role"];
     const organizationId = user.organizationId ?? user.companyId ?? "";
 
     return {

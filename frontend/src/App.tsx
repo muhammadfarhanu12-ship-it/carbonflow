@@ -19,6 +19,7 @@ const OptimizationPage = lazy(async () => ({ default: (await import("./pages/Opt
 const MarketplacePage = lazy(async () => ({ default: (await import("./pages/MarketplacePage")).MarketplacePage }));
 const ReportsPage = lazy(async () => ({ default: (await import("./pages/ReportsPage")).ReportsPage }));
 const LedgerPage = lazy(async () => ({ default: (await import("./pages/LedgerPage")).LedgerPage }));
+const AuditLogsPage = lazy(async () => ({ default: (await import("./pages/AuditLogsPage")).AuditLogsPage }));
 const SettingsPage = lazy(async () => ({ default: (await import("./pages/SettingsPage")).SettingsPage }));
 
 const SigninPage = lazy(async () => ({ default: (await import("./pages/auth/SigninPage")).SigninPage }));
@@ -72,6 +73,7 @@ export default function App() {
                   <Route path="optimization" element={<OptimizationPage />} />
                   <Route path="marketplace" element={<MarketplacePage />} />
                   <Route path="reports" element={<ReportsPage />} />
+                  <Route path="audit-logs" element={<AuditLogsPage />} />
                   <Route path="settings" element={<SettingsPage />} />
                 </Route>
 

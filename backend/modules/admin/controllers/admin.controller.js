@@ -31,6 +31,27 @@ exports.getCarbonData = async (req, res) => sendSuccess(res, {
   data: await AdminService.listCarbonData(req.query),
 });
 
+exports.getEmissionFactors = async (req, res) => sendSuccess(res, {
+  message: "Emission factors fetched successfully",
+  data: await AdminService.listEmissionFactors(req.query),
+});
+
+exports.createEmissionFactor = async (req, res) => sendSuccess(res, {
+  statusCode: 201,
+  message: "Emission factor created successfully",
+  data: await AdminService.createEmissionFactor(req.body, req.admin),
+});
+
+exports.updateEmissionFactor = async (req, res) => sendSuccess(res, {
+  message: "Emission factor updated successfully",
+  data: await AdminService.updateEmissionFactor(req.params.id, req.body, req.admin),
+});
+
+exports.deactivateEmissionFactor = async (req, res) => sendSuccess(res, {
+  message: "Emission factor deactivated successfully",
+  data: await AdminService.deactivateEmissionFactor(req.params.id, req.admin),
+});
+
 exports.getReports = async (req, res) => sendSuccess(res, {
   message: "Reports fetched successfully",
   data: await AdminService.listReports(req.query),

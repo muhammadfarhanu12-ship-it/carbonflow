@@ -5,7 +5,7 @@ const adminSchema = withBaseSchema({
   name: { type: String, required: true, trim: true, maxlength: 120 },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true, maxlength: 160 },
   passwordHash: { type: String, required: true, select: false },
-  role: { type: String, enum: ["superadmin", "moderator"], default: "moderator" },
+  role: { type: String, enum: ["owner", "superadmin", "admin", "moderator"], default: "moderator" },
   status: { type: String, enum: ["active", "disabled"], default: "active" },
   lastLoginAt: { type: Date, default: null },
 }, {

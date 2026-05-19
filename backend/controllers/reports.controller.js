@@ -7,7 +7,11 @@ exports.list = async (req, res) => sendSuccess(res, {
 });
 
 exports.generate = async (req, res) => {
-  const report = await ReportsService.generate(req.body, req.user.companyId, req.user);
+  const report = await ReportsService.generate(req.body, req.user.companyId, {
+    ...req.user,
+    ipAddress: req.ip || req.headers["x-forwarded-for"] || null,
+    userAgent: req.headers["user-agent"] || null,
+  });
   req.io.emit("reportGenerated", report);
   return sendSuccess(res, {
     statusCode: 201,

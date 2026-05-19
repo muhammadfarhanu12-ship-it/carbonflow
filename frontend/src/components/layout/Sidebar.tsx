@@ -7,9 +7,11 @@ import {
   Settings, 
   Leaf,
   LineChart,
-  ShoppingBag
+  ShoppingBag,
+  FileClock
 } from "lucide-react";
 import { cn } from "@/src/utils/cn";
+import { useAuth } from "@/src/hooks/useAuth";
 
 const navigation = [
   { name: "Dashboard", href: "/app", icon: LayoutDashboard },
@@ -19,11 +21,14 @@ const navigation = [
   { name: "Optimization", href: "/app/optimization", icon: LineChart },
   { name: "Marketplace", href: "/app/marketplace", icon: ShoppingBag },
   { name: "Reports", href: "/app/reports", icon: Leaf },
+  { name: "Audit Logs", href: "/app/audit-logs", icon: FileClock, auditOnly: true },
   { name: "Settings", href: "/app/settings", icon: Settings },
 ];
 
 export function Sidebar() {
   const location = useLocation();
+  const { user } = useAuth();
+  const canViewAuditLogs = ["OWNER", "ADMIN", "SUPERADMIN", "AUDITOR", "ANALYST"].includes(String(user?.role || "").toUpperCase());
 
   return (
     <div className="flex h-full w-64 flex-col border-r bg-card">
@@ -33,7 +38,7 @@ export function Sidebar() {
       </div>
       <div className="flex-1 overflow-y-auto py-4">
         <nav className="space-y-1 px-3">
-          {navigation.map((item) => {
+          {navigation.filter((item) => !item.auditOnly || canViewAuditLogs).map((item) => {
             const isActive = location.pathname === item.href;
             return (
               <Link

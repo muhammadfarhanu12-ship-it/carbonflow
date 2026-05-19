@@ -60,10 +60,16 @@ async function optionalAdminToken(req, _res, next) {
 }
 
 function requireAdminRole(...roles) {
-  const allowedRoles = roles.map((role) => String(role).toLowerCase());
+  const roleAliases = {
+    owner: "superadmin",
+    superadmin: "superadmin",
+    admin: "admin",
+    moderator: "moderator",
+  };
+  const allowedRoles = roles.map((role) => roleAliases[String(role).toLowerCase()] || String(role).toLowerCase());
 
   return (req, _res, next) => {
-    const adminRole = String(req.admin?.role || "").toLowerCase();
+    const adminRole = roleAliases[String(req.admin?.role || "").toLowerCase()] || String(req.admin?.role || "").toLowerCase();
 
     if (!adminRole || !allowedRoles.includes(adminRole)) {
       next(new ApiError(403, "You do not have permission to access this admin resource"));

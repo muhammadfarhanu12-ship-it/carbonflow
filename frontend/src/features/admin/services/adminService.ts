@@ -30,10 +30,10 @@ export const adminService = {
 
   getShipments: (pageSize = DEFAULT_PAGE_SIZE) => apiClient.get<AdminPaginated<AdminShipment>>(`/admin/shipments?pageSize=${pageSize}`),
 
-  getEmissionFactors: (pageSize = DEFAULT_PAGE_SIZE) => apiClient.get<AdminPaginated<EmissionFactor>>(`/admin/carbon-data?pageSize=${pageSize}`),
-  createEmissionFactor: (data: Omit<EmissionFactor, "id" | "updatedAt">) => apiClient.post<EmissionFactor>("/admin/carbon-data", data),
-  updateEmissionFactor: (id: string, data: Partial<EmissionFactor>) => apiClient.put<EmissionFactor>(`/admin/carbon-data/${id}`, data),
-  deleteEmissionFactor: (id: string) => apiClient.delete<{ id: string }>(`/admin/carbon-data/${id}`),
+  getEmissionFactors: (params = `?pageSize=${DEFAULT_PAGE_SIZE}`) => apiClient.get<AdminPaginated<EmissionFactor>>(`/admin/emission-factors${params}`),
+  createEmissionFactor: (data: Partial<EmissionFactor>) => apiClient.post<EmissionFactor>("/admin/emission-factors", data),
+  updateEmissionFactor: (id: string, data: Partial<EmissionFactor>) => apiClient.patch<EmissionFactor>(`/admin/emission-factors/${id}`, data),
+  deactivateEmissionFactor: (id: string) => apiClient.patch<EmissionFactor>(`/admin/emission-factors/${id}/deactivate`),
 
   getMarketplaceProjects: async (pageSize = DEFAULT_PAGE_SIZE) => {
     const response = await apiClient.get<MarketplaceOverview>(`/marketplace?pageSize=${pageSize}&includeAllStatuses=true`);

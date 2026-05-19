@@ -222,6 +222,13 @@ class UserService {
       throw new ApiError(403, "You do not have permission to assign that role");
     }
 
+    const oldValue = {
+      role: user.role,
+      status: user.status,
+      name: user.name,
+      email: user.email,
+    };
+
     Object.assign(user, {
       name: payload.name ?? user.name,
       email: payload.email ?? user.email,
@@ -235,13 +242,21 @@ class UserService {
 
     await user.save();
     const updatedUser = await User.findById(id).populate("company");
+    const roleChanged = payload.role && String(payload.role).toUpperCase() !== String(oldValue.role).toUpperCase();
     await AuditService.log({
       companyId: requester.companyId,
       userId: requester.id,
       userEmail: requester.email,
-      action: "user.updated",
+      action: roleChanged ? "user_role_changed" : "user.updated",
       entityType: "User",
       entityId: id,
+      oldValue,
+      newValue: {
+        role: updatedUser.role,
+        status: updatedUser.status,
+        name: updatedUser.name,
+        email: updatedUser.email,
+      },
       details: {
         role: updatedUser.role,
         status: updatedUser.status,

@@ -22,6 +22,7 @@ const marketplaceRoutes = require("./routes/marketplace.routes");
 const checkoutRoutes = require("./routes/checkout.routes");
 const creditsRoutes = require("./routes/credits.routes");
 const reportsRoutes = require("./routes/reports.routes");
+const auditLogsRoutes = require("./routes/auditLogs.routes");
 const settingsRoutes = require("./routes/settings.routes");
 const importRoutes = require("./routes/import.routes");
 const shipmentRoutes = require("./routes/shipment.routes");
@@ -169,6 +170,7 @@ function createApp() {
   app.use("/api/checkout", checkoutRoutes);
   app.use("/api/credits", creditsRoutes);
   app.use("/api/reports", reportsRoutes);
+  app.use("/api/audit-logs", auditLogsRoutes);
   app.use("/api/settings", settingsRoutes);
   app.use("/api/user/settings", settingsRoutes);
   app.use("/api/emissions", shipmentEmissionsRoutes);

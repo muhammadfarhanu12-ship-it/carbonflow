@@ -1,20 +1,24 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
-
-# Run and deploy your AI Studio app
-
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/e4cebfff-c317-4b26-a001-c7e6538ba7c1
+# CarbonFlow Frontend
 
 ## Run Locally
 
-**Prerequisites:**  Node.js
+Prerequisites: Node.js 20+ and a running CarbonFlow backend.
 
+1. Install dependencies: `npm install`
+2. Set `VITE_API_BASE_URL` in `.env.local` or `.env`.
+3. Run the app: `npm run dev`
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Example:
+
+```text
+VITE_API_BASE_URL=http://localhost:5000/api
+VITE_SOCKET_URL=http://localhost:5000
+```
+
+## Enterprise Carbon Workflows
+
+- Dashboard uses `/api/dashboard/summary` for live Scope 1/2/3 totals, monthly trends, category breakdowns, facility/business-unit summaries, data quality, and report status.
+- Ledger includes a connected emission activity form for Scope 1, Scope 2, and practical Scope 3 categories.
+- Reports use authenticated API downloads so generated PDF/CSV files work with bearer-token sessions.
+
+Warning: This MVP uses sample emission factors. Replace with official factors before production use.

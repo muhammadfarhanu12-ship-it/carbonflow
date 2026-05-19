@@ -2,6 +2,7 @@ import type { MarketplaceListingStatus, PaginatedResponse } from "@/src/types/pl
 
 export interface AdminCompany {
   id: string;
+  companyId?: string | null;
   name: string;
   industry: string;
   headquarters: string;
@@ -40,11 +41,26 @@ export interface AdminShipment {
 
 export interface EmissionFactor {
   id: string;
+  companyId?: string | null;
   name: string;
+  scope: 1 | 2 | 3;
   category: string;
+  activityType: string;
+  activityUnit: string;
+  factorValue: number;
   value: number;
   unit: string;
+  factorUnit: string;
   source?: string | null;
+  sourceName: string;
+  sourceYear: number;
+  country?: string | null;
+  region: string;
+  version: string;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  isSample: boolean;
+  isActive: boolean;
   updatedAt: string;
 }
 

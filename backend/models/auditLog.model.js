@@ -9,11 +9,16 @@ const auditLogSchema = withBaseSchema({
   entityType: { type: String, default: null, trim: true, index: true },
   entityId: { type: String, default: null, trim: true, index: true },
   ipAddress: { type: String, default: null, trim: true },
+  userAgent: { type: String, default: null, trim: true },
+  oldValue: { type: Object, default: null },
+  newValue: { type: Object, default: null },
   details: { type: Object, default: null },
 }, {
   collection: "audit_logs",
 });
 
 auditLogSchema.index({ companyId: 1, createdAt: -1 });
+auditLogSchema.index({ companyId: 1, action: 1, createdAt: -1 });
+auditLogSchema.index({ companyId: 1, entityType: 1, createdAt: -1 });
 
 module.exports = mongoose.models.AuditLog || mongoose.model("AuditLog", auditLogSchema);

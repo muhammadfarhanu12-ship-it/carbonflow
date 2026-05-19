@@ -3,7 +3,6 @@ import { Download, FileSpreadsheet, FileText, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card";
 import { Button } from "@/src/components/ui/button";
 import { reportsService } from "@/src/services/reportsService";
-import { buildAbsoluteApiUrl } from "@/src/services/apiClient";
 import { socketService } from "@/src/services/socketService";
 import { useToast } from "@/src/components/providers/ToastProvider";
 import type { ReportItem } from "@/src/types/platform";
@@ -13,6 +12,7 @@ export function ReportsPage() {
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState<ReportItem["type"] | null>(null);
+  const [includeUnapproved, setIncludeUnapproved] = useState(false);
   const [error, setError] = useState("");
 
   const loadReports = async () => {
@@ -40,7 +40,11 @@ export function ReportsPage() {
         name: `${type} ${new Date().toLocaleDateString()}`,
         type,
         format,
-        metadata: { generatedFrom: "frontend" },
+        metadata: {
+          generatedFrom: "frontend",
+          approvedOnly: !includeUnapproved,
+          includeUnapproved,
+        },
       });
       showToast({
         tone: "success",
@@ -55,10 +59,17 @@ export function ReportsPage() {
     }
   };
 
-  const openReportDownload = (downloadUrl: string) => {
+  const openReportDownload = async (report: ReportItem) => {
     try {
-      const absoluteUrl = buildAbsoluteApiUrl(downloadUrl);
-      window.open(absoluteUrl, "_blank", "noopener,noreferrer");
+      const blob = await reportsService.downloadReport(report.downloadUrl);
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = `${report.name.replace(/[^a-z0-9-]+/gi, "_")}.${report.format.toLowerCase()}`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
     } catch (error) {
       console.error("API ERROR:", error);
       setError("Failed to open report download.");
@@ -87,6 +98,19 @@ export function ReportsPage() {
       </div>
 
       <Card>
+        <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="font-medium text-foreground">Enterprise report record selection</div>
+            <p className="text-sm text-muted-foreground">Default reports include approved records only. Including unapproved records adds a report warning.</p>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={includeUnapproved} onChange={(event) => setIncludeUnapproved(event.target.checked)} />
+            Include all records with warning
+          </label>
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader>
           <CardTitle>Recent Reports</CardTitle>
         </CardHeader>
@@ -112,7 +136,7 @@ export function ReportsPage() {
                     <td className="px-6 py-4">{new Date(report.generatedAt).toLocaleString()}</td>
                     <td className="px-6 py-4">{report.status}</td>
                     <td className="px-6 py-4 text-right">
-                      <Button variant="ghost" size="sm" onClick={() => openReportDownload(report.downloadUrl)}>
+                      <Button variant="ghost" size="sm" onClick={() => openReportDownload(report)}>
                         <Download className="mr-2 h-4 w-4" />
                         {report.format}
                       </Button>
