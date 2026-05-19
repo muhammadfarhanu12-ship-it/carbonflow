@@ -11,6 +11,7 @@ const { sendSuccess, sendError } = require("../utils/apiResponse");
 const logger = require("../utils/logger");
 
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_FRONTEND_URL = "https://carbonflow-nu.vercel.app";
 
 function createValidationError(message, errors = []) {
   const error = new Error(message);
@@ -119,12 +120,14 @@ function createEmailVerificationToken() {
 }
 
 function buildEmailVerificationUrl(token) {
+  const frontendUrl = env.frontendUrl || env.clientUrl || DEFAULT_FRONTEND_URL;
+
   try {
-    const verificationUrl = new URL("/verify-email", env.frontendUrl || env.clientUrl || "http://localhost:5173");
+    const verificationUrl = new URL("/verify-email", frontendUrl);
     verificationUrl.searchParams.set("token", token);
     return verificationUrl.toString();
   } catch {
-    return `http://localhost:5173/verify-email?token=${token}`;
+    return `${DEFAULT_FRONTEND_URL}/verify-email?token=${token}`;
   }
 }
 

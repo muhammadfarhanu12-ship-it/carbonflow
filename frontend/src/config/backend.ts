@@ -24,10 +24,10 @@ function normalizeAbsoluteUrl(value: string, variableName: string, exampleUrl: s
   return trimTrailingSlash(parsedUrl.toString());
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL;
+const API_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL;
 const rawApiBaseUrl = API_BASE || DEFAULT_API_BASE_URL;
 const rawSocketUrl = import.meta.env.VITE_SOCKET_URL;
-const normalizedApiBaseUrl = normalizeAbsoluteUrl(rawApiBaseUrl, "VITE_API_BASE_URL", DEFAULT_API_BASE_URL);
+const normalizedApiBaseUrl = normalizeAbsoluteUrl(rawApiBaseUrl, "VITE_API_URL", DEFAULT_API_BASE_URL);
 
 const BACKEND_ORIGIN = normalizedApiBaseUrl.replace(/\/api\/?$/i, "");
 const API_BASE_URL = /\/api$/i.test(normalizedApiBaseUrl)

@@ -5,15 +5,17 @@
 Prerequisites: Node.js 20+ and a running CarbonFlow backend.
 
 1. Install dependencies: `npm install`
-2. Set `VITE_API_BASE_URL` in `.env.local` or `.env`.
+2. Set `VITE_API_URL` in `.env.local` or `.env`.
 3. Run the app: `npm run dev`
 
 Example:
 
 ```text
-VITE_API_BASE_URL=http://localhost:5000/api
+VITE_API_URL=http://localhost:5000/api
 VITE_SOCKET_URL=http://localhost:5000
 ```
+
+For production on Vercel, set `VITE_API_URL=https://carbonflow-h9cj.onrender.com/api`.
 
 ## Enterprise Carbon Workflows
 

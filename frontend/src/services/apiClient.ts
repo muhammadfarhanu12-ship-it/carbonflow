@@ -205,7 +205,7 @@ async function buildApiErrorMessage(error: unknown) {
   }
 
   if (error.response?.status === 404) {
-    return `Backend route not found at ${requestUrl}. Check VITE_API_BASE_URL and the /api route prefix.`;
+    return `Backend route not found at ${requestUrl}. Check VITE_API_URL and the /api route prefix.`;
   }
 
   if (error.response?.status === 500) {
@@ -213,7 +213,7 @@ async function buildApiErrorMessage(error: unknown) {
   }
 
   if (error.request) {
-    return `Cannot connect to backend API at ${API_BASE_URL}. Make sure the backend server is running at ${BACKEND_ORIGIN} and VITE_API_BASE_URL matches.`;
+    return `Cannot connect to backend API at ${API_BASE_URL}. Make sure the backend server is running at ${BACKEND_ORIGIN} and VITE_API_URL matches.`;
   }
 
   return error.message || "Request failed";

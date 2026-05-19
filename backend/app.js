@@ -79,13 +79,11 @@ function buildCorsOriginValidator(allowedOrigins) {
 }
 
 function resolveCorsOrigins() {
-  const strictProductionOrigin = normalizeOrigin(env.frontendUrl || PRODUCTION_FRONTEND_ORIGIN) || PRODUCTION_FRONTEND_ORIGIN;
+  const origins = env.allowedOrigins && env.allowedOrigins.length > 0
+    ? env.allowedOrigins
+    : [env.frontendUrl || PRODUCTION_FRONTEND_ORIGIN];
 
-  if (env.isProduction) {
-    return [strictProductionOrigin];
-  }
-
-  return env.allowedOrigins;
+  return [...new Set(origins.map((origin) => normalizeOrigin(origin)).filter(Boolean))];
 }
 
 function createApp() {
@@ -151,9 +149,7 @@ function createApp() {
   };
 
   app.get("/health", healthHandler);
-  app.get("/api/health", (_req, res) => {
-    res.status(200).json({ status: "OK" });
-  });
+  app.get("/api/health", healthHandler);
 
   if (!env.isProduction) {
     app.use("/auth", authRoutes);

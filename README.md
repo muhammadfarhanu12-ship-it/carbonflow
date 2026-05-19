@@ -21,7 +21,7 @@ npm install
 npm run dev
 ```
 
-The frontend expects `VITE_API_BASE_URL` to include the `/api` prefix, for example `http://localhost:5000/api`.
+The frontend expects `VITE_API_URL` to include the `/api` prefix, for example `http://localhost:5000/api` locally or `https://carbonflow-h9cj.onrender.com/api` in production. `VITE_API_BASE_URL` remains supported for older local setups.
 
 ## Environment Variables
 

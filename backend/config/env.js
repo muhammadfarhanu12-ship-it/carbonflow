@@ -77,21 +77,23 @@ function normalizeHttpUrl(value) {
 const nodeEnv = process.env.NODE_ENV || "development";
 const port = parseNumber(process.env.PORT, 5000);
 const productionFrontendUrl = "https://carbonflow-nu.vercel.app";
+const defaultLocalClientUrls = ["http://localhost:5173", "http://127.0.0.1:5173"];
 const defaultClientUrl = parseString(
   process.env.CLIENT_URL,
   parseString(process.env.FRONTEND_URL, "http://localhost:5173"),
 );
 const clientUrls = parseList(
   process.env.CLIENT_URLS,
-  [defaultClientUrl],
+  [defaultClientUrl, ...defaultLocalClientUrls],
 );
 const frontendUrl = parseString(process.env.FRONTEND_URL, clientUrls[0] || defaultClientUrl);
+const corsOrigins = parseList(process.env.CORS_ORIGINS, []);
 const adminClientUrls = parseList(
   process.env.ADMIN_CLIENT_URLS,
   [process.env.ADMIN_CLIENT_URL || "http://localhost:3001"],
 );
 const allowedOrigins = [...new Set(
-  [...clientUrls, ...adminClientUrls, frontendUrl, productionFrontendUrl]
+  [...corsOrigins, ...clientUrls, ...adminClientUrls, frontendUrl, productionFrontendUrl]
     .map((origin) => normalizeHttpUrl(origin))
     .filter(Boolean),
 )];
@@ -106,6 +108,7 @@ const env = {
   clientUrl: clientUrls[0] || "http://localhost:5173",
   clientUrls,
   frontendUrl,
+  corsOrigins,
   adminClientUrl: adminClientUrls[0] || "http://localhost:3001",
   adminClientUrls,
   allowedOrigins,
@@ -153,8 +156,8 @@ function validateEnv() {
     missing.push("JWT_SECRET");
   }
 
-  if (!env.isTest && !process.env.FRONTEND_URL) {
-    missing.push("FRONTEND_URL");
+  if (!env.isTest && !process.env.FRONTEND_URL && !process.env.CLIENT_URL) {
+    missing.push("FRONTEND_URL or CLIENT_URL");
   }
 
   if (!env.isTest && !process.env.EMAIL_USER && !process.env.SMTP_USER) {
@@ -165,8 +168,8 @@ function validateEnv() {
     missing.push("EMAIL_PASS");
   }
 
-  if (env.isProduction && env.clientUrls.length === 0) {
-    missing.push("CLIENT_URLS");
+  if (env.isProduction && env.allowedOrigins.length === 0) {
+    missing.push("CORS_ORIGINS or CLIENT_URL");
   }
 
   if (missing.length > 0) {
