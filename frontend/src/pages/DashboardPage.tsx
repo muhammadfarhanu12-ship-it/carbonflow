@@ -14,70 +14,12 @@ import {
   Cell,
 } from "recharts";
 import { Activity, BarChart3, CheckCircle2, Cloud, ClipboardList, DollarSign, Factory, FileText, Globe, ShieldAlert } from "lucide-react";
-import { dashboardService } from "@/src/services/dashboardService";
+import { dashboardService, EMPTY_DASHBOARD_DATA } from "@/src/services/dashboardService";
 import { socketService } from "@/src/services/socketService";
 import type { DashboardData } from "@/src/types/platform";
 import { ChartWrapper } from "@/src/components/shared/ChartWrapper";
 
 const COLORS = ["#16a34a", "#0284c7", "#f59e0b", "#7c3aed"];
-const EMPTY_DASHBOARD_DATA: DashboardData = {
-  summary: {
-    totalEmissions: 0,
-    scope1: 0,
-    scope2: 0,
-    scope3: 0,
-    carbonIntensity: 0,
-    carbonIntensityUnit: "kgCO2e/USD",
-    totalCost: 0,
-    totalLogisticsCost: 0,
-    totalOffsets: 0,
-    offsetsRetired: 0,
-    highRiskSuppliers: 0,
-    activeProjects: 0,
-    averageSupplierScore: 0,
-    totalSpend: 0,
-    totalCarbonTax: 0,
-    dataCompletenessPct: 0,
-    activitiesRecorded: 0,
-    totalRecords: 0,
-    draftRecords: 0,
-    submittedRecords: 0,
-    reviewedRecords: 0,
-    approvedRecords: 0,
-    rejectedRecords: 0,
-    needsCorrectionRecords: 0,
-    unapprovedRecords: 0,
-    reportsGenerated: 0,
-    reportStatus: "NOT_GENERATED",
-  },
-  monthly: [],
-  costVsEmissions: [],
-  transportModes: [],
-  scopeBreakdown: [],
-  categories: [],
-  facilities: [],
-  dataQuality: {
-    completenessPct: 0,
-    requiredSignals: 6,
-    completedSignals: 0,
-    sampleFactorRecords: 0,
-    missingFactorRecords: 0,
-    draftRecords: 0,
-    submittedRecords: 0,
-    reviewedRecords: 0,
-    approvedRecords: 0,
-    rejectedRecords: 0,
-    needsCorrectionRecords: 0,
-    unapprovedRecords: 0,
-    status: "NEEDS_DATA",
-  },
-  reportStatus: {
-    generatedCount: 0,
-    latestStatus: "NOT_GENERATED",
-    latestGeneratedAt: null,
-  },
-};
-
 export function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);

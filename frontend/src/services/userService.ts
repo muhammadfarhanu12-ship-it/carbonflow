@@ -1,5 +1,6 @@
 import { apiClient } from "./apiClient";
 import type { ManagedUser, PaginatedResponse, UserRole } from "@/src/types/platform";
+import { normalizePaginatedResponse } from "@/src/utils/apiResponse";
 
 export interface ManagedUserPayload {
   name: string;
@@ -10,7 +11,9 @@ export interface ManagedUserPayload {
 }
 
 export const userService = {
-  listUsers: (params = "") => apiClient.get<PaginatedResponse<ManagedUser>>(`/users${params}`),
+  listUsers: async (params = ""): Promise<PaginatedResponse<ManagedUser>> => (
+    normalizePaginatedResponse<ManagedUser>(await apiClient.get<unknown>(`/users${params}`))
+  ),
   createUser: (data: ManagedUserPayload) => apiClient.post<ManagedUser>("/users", data),
   updateUser: (id: string, data: Partial<ManagedUserPayload>) => apiClient.put<ManagedUser>(`/users/${id}`, data),
   deleteUser: (id: string) => apiClient.delete<{ id: string }>(`/users/${id}`),

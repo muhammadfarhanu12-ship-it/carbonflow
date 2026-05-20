@@ -7,6 +7,7 @@ import type {
   ShipmentImportRowPayload,
   TransportMode,
 } from "@/src/types/platform";
+import { normalizePaginatedResponse } from "@/src/utils/apiResponse";
 
 export interface ShipmentPayload {
   supplierId: string;
@@ -26,8 +27,12 @@ export interface ShipmentPayload {
 }
 
 export const shipmentService = {
-  getShipments: (params = "") => apiClient.get<PaginatedResponse<Shipment>>(`/shipments${params}`),
-  getActiveShipments: () => apiClient.get<PaginatedResponse<Shipment>>("/shipments?activeOnly=true&pageSize=50"),
+  getShipments: async (params = ""): Promise<PaginatedResponse<Shipment>> => (
+    normalizePaginatedResponse<Shipment>(await apiClient.get<unknown>(`/shipments${params}`))
+  ),
+  getActiveShipments: async (): Promise<PaginatedResponse<Shipment>> => (
+    normalizePaginatedResponse<Shipment>(await apiClient.get<unknown>("/shipments?activeOnly=true&pageSize=50"), 50)
+  ),
   createShipment: (data: ShipmentPayload) => apiClient.post<Shipment>("/shipments", data),
   updateShipment: (id: string, data: Partial<ShipmentPayload>) => apiClient.put<Shipment>(`/shipments/${id}`, data),
   deleteShipment: (id: string) => apiClient.delete<{ success: boolean }>(`/shipments/${id}`),

@@ -37,7 +37,22 @@ function parseStoredUser(rawUser: string | null): SessionUser | null {
   }
 
   try {
-    return JSON.parse(rawUser) as SessionUser;
+    const parsed = JSON.parse(rawUser) as Partial<SessionUser>;
+
+    if (!parsed || typeof parsed !== "object" || !parsed.id || !parsed.email || !parsed.role) {
+      removeStorage(USER_KEY);
+      removeStorage(ROLE_KEY);
+      return null;
+    }
+
+    return {
+      id: String(parsed.id),
+      companyId: String(parsed.companyId || parsed.organizationId || ""),
+      organizationId: parsed.organizationId ? String(parsed.organizationId) : parsed.companyId ? String(parsed.companyId) : "",
+      name: String(parsed.name || parsed.email || "CarbonFlow user"),
+      email: String(parsed.email),
+      role: parsed.role,
+    };
   } catch {
     removeStorage(USER_KEY);
     removeStorage(ROLE_KEY);
@@ -54,10 +69,22 @@ export function getRefreshToken() {
 }
 
 export function getStoredSession(): StoredSession {
+  const token = getAccessToken();
+  const user = parseStoredUser(readStorage(USER_KEY));
+
+  if (token && !user) {
+    clearStoredSession();
+    return {
+      token: null,
+      refreshToken: null,
+      user: null,
+    };
+  }
+
   return {
-    token: getAccessToken(),
+    token,
     refreshToken: getRefreshToken(),
-    user: parseStoredUser(readStorage(USER_KEY)),
+    user,
   };
 }
 
@@ -73,6 +100,11 @@ export function setStoredTokens({ token, refreshToken }: { token: string; refres
 }
 
 export function setStoredUser(user: SessionUser) {
+  if (!user?.id || !user?.email || !user?.role) {
+    clearStoredSession();
+    return;
+  }
+
   writeStorage(USER_KEY, JSON.stringify(user));
   writeStorage(ROLE_KEY, user.role);
 }
@@ -91,4 +123,3 @@ export function clearStoredSession() {
   removeStorage(USER_KEY);
   removeStorage(ROLE_KEY);
 }
-

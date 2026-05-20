@@ -1,5 +1,6 @@
 import { apiClient } from "./apiClient";
-import type { CarbonProject, MarketplaceOverview, MarketplaceListingStatus } from "@/src/types/platform";
+import type { CarbonCreditTransaction, CarbonProject, MarketplaceOverview, MarketplaceListingStatus } from "@/src/types/platform";
+import { asArray, asNumber, isRecord, normalizePaginatedResponse } from "@/src/utils/apiResponse";
 
 export interface ProjectPayload {
   name: string;
@@ -73,8 +74,23 @@ export interface BudgetIncreaseRequestResult {
   emailDelivered: boolean;
 }
 
+function normalizeMarketplaceOverview(payload: unknown): MarketplaceOverview {
+  const paginated = normalizePaginatedResponse<CarbonProject>(payload);
+  const source = isRecord(payload) ? payload : {};
+  const summary = isRecord(source.summary) ? source.summary : {};
+
+  return {
+    ...paginated,
+    transactions: asArray<CarbonCreditTransaction>(source.transactions),
+    summary: {
+      totalCreditsRetired: asNumber(summary.totalCreditsRetired),
+      totalSpendUsd: asNumber(summary.totalSpendUsd),
+    },
+  };
+}
+
 export const marketplaceService = {
-  getProjects: (params = "") => apiClient.get<MarketplaceOverview>(`/marketplace${params}`),
+  getProjects: async (params = "") => normalizeMarketplaceOverview(await apiClient.get<unknown>(`/marketplace${params}`)),
   createProject: (data: ProjectPayload) => apiClient.post<CarbonProject>("/marketplace", data),
   createManagedProject: (data: ProjectManagementPayload) => apiClient.post<CarbonProject>("/marketplace/projects", data),
   updateProject: (id: string, data: Partial<ProjectPayload>) => apiClient.put<CarbonProject>(`/marketplace/${id}`, data),

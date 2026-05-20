@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Eye, EyeOff, Leaf, Loader2 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
@@ -15,7 +15,11 @@ export function SigninPage() {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { signin } = useAuth();
+  const sessionMessage = searchParams.get('session') === 'expired'
+    ? 'Session expired, please log in again.'
+    : '';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,13 +66,13 @@ export function SigninPage() {
           className="bg-card py-8 px-4 shadow-xl sm:rounded-xl sm:px-10 border"
         >
           <form className="space-y-6" onSubmit={handleSubmit}>
-            {error && (
+            {(error || sessionMessage) && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
                 className="p-3 rounded-md bg-destructive/10 text-destructive text-sm font-medium space-y-2"
               >
-                <p>{error}</p>
+                <p>{error || sessionMessage}</p>
                 {error.toLowerCase().includes('verify your email') && email && (
                   <Link
                     to={`/verify-email?email=${encodeURIComponent(email)}`}

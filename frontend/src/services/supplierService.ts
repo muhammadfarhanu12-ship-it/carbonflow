@@ -5,6 +5,7 @@ import type {
   Supplier,
   SupplierScoreResult,
 } from "@/src/types/platform";
+import { normalizePaginatedResponse } from "@/src/utils/apiResponse";
 
 export interface SupplierScorePayload {
   id?: string;
@@ -47,7 +48,9 @@ export interface SupplierPayload extends SupplierScorePayload {
 }
 
 export const supplierService = {
-  getSuppliers: (params = "") => apiClient.get<PaginatedResponse<Supplier>>(`/suppliers${params}`),
+  getSuppliers: async (params = ""): Promise<PaginatedResponse<Supplier>> => (
+    normalizePaginatedResponse<Supplier>(await apiClient.get<unknown>(`/suppliers${params}`))
+  ),
   getSupplier: (id: string) => apiClient.get<Supplier>(`/suppliers/${id}`),
   createSupplier: (data: SupplierPayload) => apiClient.post<Supplier>("/suppliers", data),
   updateSupplier: (id: string, data: Partial<SupplierPayload>) => apiClient.put<Supplier>(`/suppliers/${id}`, data),

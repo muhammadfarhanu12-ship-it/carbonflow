@@ -1,5 +1,6 @@
 import { apiClient } from "./apiClient";
 import type { EmissionRecord, PaginatedResponse } from "@/src/types/platform";
+import { asArray, isRecord, normalizePaginatedResponse } from "@/src/utils/apiResponse";
 
 export interface EmissionActivityPayload {
   scope: 1 | 2 | 3;
@@ -78,8 +79,17 @@ export interface EmissionImportPreview {
 }
 
 export const emissionsService = {
-  getActivities: (params = "") => apiClient.get<PaginatedResponse<EmissionRecord>>(`/emissions${params}`),
-  getFactors: (params = "") => apiClient.get<EmissionFactor[]>(`/emissions/factors${params}`),
+  getActivities: async (params = ""): Promise<PaginatedResponse<EmissionRecord>> => (
+    normalizePaginatedResponse<EmissionRecord>(await apiClient.get<unknown>(`/emissions${params}`))
+  ),
+  getFactors: async (params = "") => {
+    const response = await apiClient.get<unknown>(`/emissions/factors${params}`);
+    return Array.isArray(response)
+      ? response as EmissionFactor[]
+      : isRecord(response)
+        ? asArray<EmissionFactor>(response.data)
+        : [];
+  },
   matchFactor: (params = "") => apiClient.get<EmissionFactor | null>(`/emissions/factors/match${params}`),
   createActivity: (payload: EmissionActivityPayload) => apiClient.post<EmissionRecord>("/emissions/activities", payload),
   updateStatus: (id: string, dataStatus: string, notes?: string) => apiClient.patch<EmissionRecord>(`/emissions/${id}/status`, { dataStatus, notes }),
