@@ -25,7 +25,11 @@ The frontend expects `VITE_API_URL` to include the `/api` prefix, for example `h
 
 ## Environment Variables
 
-Backend values are documented in `backend/.env.example`. Frontend values are documented in `frontend/.env.example`.
+Backend values are documented in `backend/.env.example`. Add those variables in the Render dashboard for the backend service. At minimum, production needs `MONGO_URI`, strong JWT secrets, `FRONTEND_URL`, `ADMIN_URL`, `BACKEND_URL`, `CORS_ORIGINS`, and SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`) so signup verification emails can be delivered.
+
+Main frontend values are documented in `frontend/.env.example`. Add `VITE_API_URL=https://carbonflow-h9cj.onrender.com/api` in the Vercel dashboard for `https://carbonflow-nu.vercel.app`.
+
+Admin panel values are documented in `admin-panel/.env.example`. Add `VITE_API_URL=https://carbonflow-h9cj.onrender.com/api` and `VITE_ADMIN_ROLE=SUPER_ADMIN` in the Vercel dashboard for `https://carbonflow-admin.vercel.app`.
 
 ## Carbon Calculations
 

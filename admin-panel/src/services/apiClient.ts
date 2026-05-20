@@ -1,9 +1,14 @@
 import axios from 'axios';
 
+const DEFAULT_API_BASE_URL = import.meta.env.DEV
+  ? 'http://localhost:5000/api'
+  : 'https://carbonflow-h9cj.onrender.com/api';
+
 const API_BASE_URL = (
-  import.meta.env.VITE_ADMIN_API_BASE_URL
+  import.meta.env.VITE_API_URL
+  || import.meta.env.VITE_ADMIN_API_BASE_URL
   || import.meta.env.VITE_API_BASE_URL
-  || 'http://localhost:5000/api'
+  || DEFAULT_API_BASE_URL
 ).replace(/\/$/, '');
 
 type ApiEnvelope<T> = {
@@ -23,6 +28,14 @@ const axiosClient = axios.create({
 
 axiosClient.interceptors.request.use((config) => {
   const token = localStorage.getItem('adminToken');
+  const rawUrl = String(config.url || '');
+
+  if (rawUrl) {
+    config.url = rawUrl.startsWith('/api/')
+      ? rawUrl.replace(/^\/api/i, '')
+      : rawUrl;
+  }
+
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }

@@ -2,7 +2,9 @@ function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
 }
 
-const DEFAULT_BACKEND_ORIGIN = "https://carbonflow-h9cj.onrender.com";
+const PRODUCTION_BACKEND_ORIGIN = "https://carbonflow-h9cj.onrender.com";
+const LOCAL_BACKEND_ORIGIN = "http://localhost:5000";
+const DEFAULT_BACKEND_ORIGIN = import.meta.env.DEV ? LOCAL_BACKEND_ORIGIN : PRODUCTION_BACKEND_ORIGIN;
 const DEFAULT_API_BASE_URL = `${DEFAULT_BACKEND_ORIGIN}/api`;
 
 function normalizeAbsoluteUrl(value: string, variableName: string, exampleUrl: string) {

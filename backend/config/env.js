@@ -77,7 +77,13 @@ function normalizeHttpUrl(value) {
 const nodeEnv = process.env.NODE_ENV || "development";
 const port = parseNumber(process.env.PORT, 5000);
 const productionFrontendUrl = "https://carbonflow-nu.vercel.app";
-const defaultLocalClientUrls = ["http://localhost:5173", "http://127.0.0.1:5173"];
+const productionAdminUrl = "https://carbonflow-admin.vercel.app";
+const defaultLocalClientUrls = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:5174",
+  "http://127.0.0.1:5174",
+];
 const defaultClientUrl = parseString(
   process.env.CLIENT_URL,
   parseString(process.env.FRONTEND_URL, "http://localhost:5173"),
@@ -87,17 +93,19 @@ const clientUrls = parseList(
   [defaultClientUrl, ...defaultLocalClientUrls],
 );
 const frontendUrl = parseString(process.env.FRONTEND_URL, clientUrls[0] || defaultClientUrl);
+const adminUrl = parseString(process.env.ADMIN_URL, productionAdminUrl);
+const backendUrl = normalizeHttpUrl(parseString(process.env.BACKEND_URL, `http://localhost:${port}`));
 const corsOrigins = parseList(process.env.CORS_ORIGINS, []);
 const adminClientUrls = parseList(
   process.env.ADMIN_CLIENT_URLS,
-  [process.env.ADMIN_CLIENT_URL || "http://localhost:3001"],
+  [process.env.ADMIN_CLIENT_URL || adminUrl, "http://localhost:3001"],
 );
 const allowedOrigins = [...new Set(
-  [...corsOrigins, ...clientUrls, ...adminClientUrls, frontendUrl, productionFrontendUrl]
+  [...corsOrigins, ...clientUrls, ...adminClientUrls, frontendUrl, adminUrl, productionFrontendUrl, productionAdminUrl]
     .map((origin) => normalizeHttpUrl(origin))
     .filter(Boolean),
 )];
-const baseUrl = normalizeHttpUrl(parseString(process.env.BASE_URL, `http://localhost:${port}`));
+const baseUrl = normalizeHttpUrl(parseString(process.env.BASE_URL, backendUrl));
 
 const env = {
   nodeEnv,
@@ -108,6 +116,8 @@ const env = {
   clientUrl: clientUrls[0] || "http://localhost:5173",
   clientUrls,
   frontendUrl,
+  adminUrl,
+  backendUrl,
   corsOrigins,
   adminClientUrl: adminClientUrls[0] || "http://localhost:3001",
   adminClientUrls,
@@ -128,7 +138,7 @@ const env = {
     bcryptSaltRounds: parseNumber(process.env.BCRYPT_SALT_ROUNDS, 12),
   },
   admin: {
-    jwtSecret: process.env.ADMIN_JWT_SECRET || "admin-super-secret-change-me",
+    jwtSecret: process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || "admin-super-secret-change-me",
     jwtExpiresIn: process.env.ADMIN_JWT_EXPIRES_IN || "12h",
     bootstrapEmail: process.env.ADMIN_EMAIL || "admin@carbonflow.com",
     bootstrapPassword: process.env.ADMIN_PASSWORD || "Admin@12345",
@@ -161,11 +171,11 @@ function validateEnv() {
   }
 
   if (!env.isTest && !process.env.EMAIL_USER && !process.env.SMTP_USER) {
-    missing.push("EMAIL_USER");
+    missing.push("SMTP_USER");
   }
 
   if (!env.isTest && !process.env.EMAIL_PASS && !process.env.SMTP_PASS) {
-    missing.push("EMAIL_PASS");
+    missing.push("SMTP_PASS");
   }
 
   if (env.isProduction && env.allowedOrigins.length === 0) {
@@ -203,15 +213,15 @@ function validateEnv() {
   }
 
   if (env.isProduction && env.admin.jwtSecret === "admin-super-secret-change-me") {
-    throw new Error("ADMIN_JWT_SECRET must be changed before running in production.");
+    throw new Error("ADMIN_JWT_SECRET or JWT_SECRET must be changed before running in production.");
   }
 
   if (!env.isTest && !env.mail.user) {
-    throw new Error("EMAIL_USER or SMTP_USER must be configured.");
+    throw new Error("SMTP_USER must be configured.");
   }
 
   if (!env.isTest && !env.mail.pass) {
-    throw new Error("EMAIL_PASS or SMTP_PASS must be configured.");
+    throw new Error("SMTP_PASS must be configured.");
   }
 }
 

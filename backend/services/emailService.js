@@ -1,5 +1,14 @@
 const { sendEmail } = require("../utils/mailer");
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function formatCurrency(value) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -44,10 +53,23 @@ function buildWelcomeTemplate({ name, fullName }) {
 }
 
 function buildEmailVerificationTemplate({ name, fullName, verificationUrl }) {
-  const displayName = name || fullName || "there";
+  const displayName = escapeHtml(name || fullName || "there");
+  const safeVerificationUrl = escapeHtml(verificationUrl);
+  const text = [
+    `Hello ${name || fullName || "there"},`,
+    "",
+    "Welcome to CarbonFlow. Please verify your email address to activate your account.",
+    "",
+    `Verify your email: ${verificationUrl}`,
+    "",
+    "This verification link expires in 24 hours.",
+    "If you did not sign up for CarbonFlow, you can safely ignore this email.",
+    "Need help? Contact CarbonFlow support.",
+  ].join("\n");
 
   return {
     subject: "Verify your CarbonFlow account",
+    text,
     html: `
       <div style="background:#f3f4f6;padding:24px 12px;font-family:Arial,sans-serif;color:#111827;">
         <div style="max-width:600px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
@@ -57,10 +79,10 @@ function buildEmailVerificationTemplate({ name, fullName, verificationUrl }) {
           <div style="padding:24px;">
             <p style="margin:0 0 12px;">Hello ${displayName},</p>
             <p style="margin:0 0 16px;line-height:1.6;">
-              Thanks for starting your CarbonFlow free trial. Please verify your email address to activate your account.
+              Welcome to CarbonFlow. Please verify your email address to activate your account.
             </p>
             <p style="margin:0 0 20px;">
-              <a href="${verificationUrl}" style="display:inline-block;padding:12px 20px;background:#16a34a;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;">
+              <a href="${safeVerificationUrl}" style="display:inline-block;padding:12px 20px;background:#16a34a;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;">
                 Verify Email
               </a>
             </p>
@@ -68,10 +90,16 @@ function buildEmailVerificationTemplate({ name, fullName, verificationUrl }) {
               If the button above does not work, copy and paste this link into your browser:
             </p>
             <p style="margin:0 0 16px;word-break:break-all;font-size:14px;color:#065f46;">
-              <a href="${verificationUrl}" style="color:#065f46;">${verificationUrl}</a>
+              <a href="${safeVerificationUrl}" style="color:#065f46;">${safeVerificationUrl}</a>
+            </p>
+            <p style="margin:0 0 8px;font-size:13px;color:#4b5563;">
+              This verification link expires in 24 hours.
+            </p>
+            <p style="margin:0 0 8px;font-size:13px;color:#4b5563;">
+              Need help? Contact CarbonFlow support.
             </p>
             <p style="margin:0;font-size:13px;color:#4b5563;">
-              This verification link expires in 24 hours.
+              If you did not sign up for CarbonFlow, you can safely ignore this email.
             </p>
           </div>
         </div>
@@ -115,17 +143,18 @@ function buildBudgetIncreaseTemplate({
 async function sendResetPasswordEmail({ to, name, fullName, resetUrl }) {
   const template = buildResetPasswordTemplate({ name, fullName, resetUrl });
 
-  await sendEmail({
+  return sendEmail({
     to,
     subject: template.subject,
     html: template.html,
+    text: template.text,
   });
 }
 
 async function sendWelcomeEmail({ to, name, fullName }) {
   const template = buildWelcomeTemplate({ name, fullName });
 
-  await sendEmail({
+  return sendEmail({
     to,
     subject: template.subject,
     html: template.html,
@@ -135,10 +164,11 @@ async function sendWelcomeEmail({ to, name, fullName }) {
 async function sendEmailVerificationEmail({ to, name, fullName, verificationUrl }) {
   const template = buildEmailVerificationTemplate({ name, fullName, verificationUrl });
 
-  await sendEmail({
+  return sendEmail({
     to,
     subject: template.subject,
     html: template.html,
+    text: template.text,
   });
 }
 

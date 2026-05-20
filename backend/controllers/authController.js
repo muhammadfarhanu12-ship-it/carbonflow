@@ -144,11 +144,24 @@ async function issueEmailVerificationToken(user, source = "auth.flow") {
   user.isVerified = false;
   await user.save();
 
-  await sendEmailVerificationEmail({
-    to: user.email,
-    name: user.name,
-    verificationUrl: buildEmailVerificationUrl(rawToken),
-  });
+  try {
+    const emailInfo = await sendEmailVerificationEmail({
+      to: user.email,
+      name: user.name,
+      verificationUrl: buildEmailVerificationUrl(rawToken),
+    });
+
+    return { emailSent: Boolean(emailInfo) };
+  } catch (emailError) {
+    logger.error(`${source}.verification_email_failed`, {
+      userId: user.id,
+      email: user.email,
+      message: emailError.message,
+      stack: env.isProduction ? undefined : emailError.stack,
+    });
+
+    return { emailSent: false };
+  }
 }
 
 function generateAccessToken(user, rememberMe = false) {
@@ -272,14 +285,17 @@ exports.signup = async (req, res) => {
       companyName: payload.companyName || payload.company,
     });
 
-    await issueEmailVerificationToken(hydratedUser, "auth.signup");
+    const verificationDelivery = await issueEmailVerificationToken(hydratedUser, "auth.signup");
 
     return sendSuccess(res, {
       statusCode: 201,
-      message: "Verification email sent. Please check your inbox.",
+      message: verificationDelivery.emailSent
+        ? "Account created. Please check your email to verify your account."
+        : "Account created. We could not send the verification email right now. Please use resend verification.",
       data: {
         email: hydratedUser.email,
         verificationRequired: true,
+        emailSent: verificationDelivery.emailSent,
       },
     });
   } catch (error) {

@@ -24,7 +24,7 @@ function getTransporter() {
   return transporter;
 }
 
-async function sendEmail({ to, subject, html }) {
+async function sendEmail({ to, subject, html, text }) {
   if (!isMailerConfigured()) {
     logger.warn("email.skipped", {
       reason: "smtp_not_configured",
@@ -39,6 +39,7 @@ async function sendEmail({ to, subject, html }) {
     to,
     subject,
     html,
+    text,
   });
 
   logger.info("email.sent", {

@@ -18,6 +18,7 @@ export interface SignupData {
 export interface SignupResponse {
   email: string;
   verificationRequired: boolean;
+  emailSent?: boolean;
 }
 
 export interface SigninData {
@@ -79,7 +80,7 @@ class AuthService {
   }
 
   async signup(data: SignupData): Promise<SignupResponse> {
-    const response = await apiClient.post<{ email?: string; verificationRequired?: boolean }>("/auth/signup", {
+    const response = await apiClient.post<{ email?: string; verificationRequired?: boolean; emailSent?: boolean }>("/auth/signup", {
       name: data.name,
       email: data.email,
       password: data.password,
@@ -90,6 +91,7 @@ class AuthService {
     return {
       email: response?.email || data.email,
       verificationRequired: response?.verificationRequired ?? true,
+      emailSent: response?.emailSent,
     };
   }
 

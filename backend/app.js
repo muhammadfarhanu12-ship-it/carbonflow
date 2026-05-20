@@ -135,7 +135,7 @@ function createApp() {
     const isHealthy = mongoose.connection.readyState === 1;
 
     return res.status(isHealthy ? 200 : 503).json({
-      status: isHealthy ? "OK" : "DEGRADED",
+      status: isHealthy ? "ok" : "degraded",
       service: "carbonflow-backend",
       environment: env.nodeEnv,
       database: {

@@ -6,6 +6,7 @@ const { authRateLimiter, resendVerificationRateLimiter } = require("../middlewar
 const router = express.Router();
 
 router.post("/signup", authRateLimiter, authController.signupValidators, authController.signup);
+router.post("/register", authRateLimiter, authController.signupValidators, authController.signup);
 router.post("/login", authRateLimiter, authController.loginValidators, authController.login);
 router.post("/signin", authRateLimiter, authController.loginValidators, authController.login);
 router.get("/verify-email", authController.verifyEmailGet);
