@@ -5,6 +5,7 @@ const BaseService = require("./base.service");
 const AuditService = require("./audit.service");
 const { sendBudgetIncreaseRequestEmail } = require("./emailService");
 const ApiError = require("../utils/ApiError");
+const logger = require("../utils/logger");
 const cache = require("../utils/cache");
 const CheckoutLockService = require("./checkoutLock.service");
 const { OFFSET_PROJECT_STATUSES } = require("../constants/platform");
@@ -24,6 +25,7 @@ const PROJECT_STATUS_FILTER_MAP = {
 const PUBLIC_MARKETPLACE_STATUSES = ["PUBLISHED"];
 const PUBLIC_MARKETPLACE_WITH_SOLD_OUT_STATUSES = ["PUBLISHED", "SOLD_OUT"];
 const BUDGET_ADMIN_ROLES = ["ADMIN", "SUPERADMIN"];
+const BUDGET_EMAIL_TIMEOUT_MS = 10000;
 
 function isTruthyQueryFlag(value) {
   return value === true || value === "true" || value === 1 || value === "1";
@@ -80,6 +82,16 @@ function roundMoney(value) {
   }
 
   return Number(normalized.toFixed(2));
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timeoutId;
+  const timeoutPromise = new Promise((_resolve, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise])
+    .finally(() => clearTimeout(timeoutId));
 }
 
 function normalizeOptionalNumber(value, fallbackValue = null, fieldName, { min = Number.NEGATIVE_INFINITY, max = Number.POSITIVE_INFINITY } = {}) {
@@ -667,17 +679,33 @@ class MarketplaceService extends BaseService {
     const companyName = normalizeOptionalText(payload.companyName, company?.name) || "CarbonFlow Company";
     const reason = normalizeOptionalText(payload.reason, null);
 
-    const delivery = await sendBudgetIncreaseRequestEmail({
-      to: recipients,
-      requesterName,
-      requesterEmail,
-      companyName,
-      currentBudgetUsd,
-      requestedBudgetUsd,
-      remainingBudgetUsd,
-      pendingTransactionsUsd,
-      reason,
-    });
+    let delivery = null;
+
+    try {
+      delivery = await withTimeout(
+        sendBudgetIncreaseRequestEmail({
+          to: recipients,
+          requesterName,
+          requesterEmail,
+          companyName,
+          currentBudgetUsd,
+          requestedBudgetUsd,
+          remainingBudgetUsd,
+          pendingTransactionsUsd,
+          reason,
+        }),
+        BUDGET_EMAIL_TIMEOUT_MS,
+        "Budget increase notification email timed out.",
+      );
+    } catch (error) {
+      logger.warn("marketplace.budget_request.email_failed", {
+        companyId,
+        requesterEmail,
+        recipientCount: recipients.length,
+        message: error.message,
+        stack: env.isProduction ? undefined : error.stack,
+      });
+    }
 
     await AuditService.log({
       companyId,

@@ -162,6 +162,7 @@ function createApp() {
   app.use("/api/dashboard", dashboardRoutes);
   app.use("/api/ledger", ledgerRoutes);
   app.use("/api/marketplace", marketplaceRoutes);
+  app.use("/marketplace", marketplaceRoutes);
   app.use("/api/offsets", marketplaceRoutes);
   app.use("/api/checkout", checkoutRoutes);
   app.use("/api/credits", creditsRoutes);

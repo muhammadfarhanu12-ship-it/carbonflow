@@ -7,7 +7,8 @@ import {
   setStoredTokens,
 } from "@/src/utils/authSession";
 
-const REQUEST_TIMEOUT_MS = 15000;
+const REQUEST_TIMEOUT_MS = 20000;
+const WAKEUP_REQUEST_TIMEOUT_MS = 60000;
 const COLD_START_RETRY_DELAY_MS = 1200;
 const COLD_START_RETRY_STATUS_CODES = new Set([502, 503, 504]);
 const UNAUTHORIZED_EVENT_NAME = "carbonflow:unauthorized";
@@ -18,6 +19,7 @@ let lastApiErrorEventAt = 0;
 let lastApiErrorSignature = "";
 let lastApiRetryEventAt = 0;
 let lastApiRetrySignature = "";
+let hasSeenBackendResponse = false;
 
 type AuthFailureReason = "session_expired" | "unauthorized";
 
@@ -106,7 +108,13 @@ function buildRequestUrl(error: AxiosError) {
   const requestPath = error.config?.url || "";
 
   try {
-    return new URL(requestPath, `${baseUrl}/`).toString();
+    if (/^https?:\/\//i.test(String(requestPath))) {
+      return new URL(String(requestPath)).toString();
+    }
+
+    const normalizedBaseUrl = String(baseUrl).replace(/\/+$/, "");
+    const normalizedRequestPath = normalizeApiPath(String(requestPath));
+    return `${normalizedBaseUrl}${normalizedRequestPath}`;
   } catch {
     return `${baseUrl}${requestPath}`;
   }
@@ -201,7 +209,8 @@ async function buildApiErrorMessage(error: unknown) {
   const requestUrl = buildRequestUrl(error);
 
   if (error.code === "ECONNABORTED") {
-    return `Request to ${requestUrl} timed out after ${REQUEST_TIMEOUT_MS / 1000}s. Check that the backend is responsive.`;
+    const timeoutSeconds = Number(error.config?.timeout || REQUEST_TIMEOUT_MS) / 1000;
+    return `Request to ${requestUrl} timed out after ${timeoutSeconds}s. Backend is waking up. This can take up to 60 seconds on the free Render plan.`;
   }
 
   if (error.response?.status === 404) {
@@ -222,7 +231,7 @@ async function buildApiErrorMessage(error: unknown) {
 const axiosClient = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
-  timeout: REQUEST_TIMEOUT_MS,
+  timeout: WAKEUP_REQUEST_TIMEOUT_MS,
   headers: {
     Accept: "application/json",
   },
@@ -231,6 +240,12 @@ const axiosClient = axios.create({
 axiosClient.interceptors.request.use((config) => {
   const token = getAccessToken();
   config.headers = config.headers || new AxiosHeaders();
+
+  if (!hasSeenBackendResponse) {
+    config.timeout = WAKEUP_REQUEST_TIMEOUT_MS;
+  } else if (!config.timeout || config.timeout === WAKEUP_REQUEST_TIMEOUT_MS) {
+    config.timeout = REQUEST_TIMEOUT_MS;
+  }
 
   if (typeof config.url === "string" && config.url) {
     config.url = normalizeApiPath(config.url);
@@ -261,7 +276,7 @@ async function refreshAccessToken() {
       `${API_BASE_URL}/auth/refresh-token`,
       { refreshToken },
       {
-        timeout: REQUEST_TIMEOUT_MS,
+        timeout: hasSeenBackendResponse ? REQUEST_TIMEOUT_MS : WAKEUP_REQUEST_TIMEOUT_MS,
         withCredentials: true,
       },
     )
@@ -288,7 +303,10 @@ async function refreshAccessToken() {
 }
 
 axiosClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    hasSeenBackendResponse = true;
+    return response;
+  },
   async (error) => {
     const status = error.response?.status;
     const originalRequest = (error.config || {}) as typeof error.config & {
@@ -310,8 +328,9 @@ axiosClient.interceptors.response.use(
 
     if (shouldRetryColdStart(error, originalRequest)) {
       originalRequest._coldStartRetried = true;
+      originalRequest.timeout = WAKEUP_REQUEST_TIMEOUT_MS;
       dispatchApiRetryEvent({
-        message: "Waking backend server. Retrying request once...",
+        message: "Backend is waking up. This can take up to 60 seconds on the free Render plan. Retrying request once...",
         path: requestPath || undefined,
       });
       await wait(COLD_START_RETRY_DELAY_MS);

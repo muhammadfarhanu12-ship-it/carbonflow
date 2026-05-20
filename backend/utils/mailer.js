@@ -3,6 +3,7 @@ const env = require("../config/env");
 const logger = require("./logger");
 
 let transporter = null;
+const SMTP_TIMEOUT_MS = 10000;
 
 function isMailerConfigured() {
   return Boolean(env.mail.user && env.mail.pass);
@@ -14,6 +15,9 @@ function getTransporter() {
       host: env.mail.host,
       port: env.mail.port,
       secure: env.mail.secure,
+      connectionTimeout: SMTP_TIMEOUT_MS,
+      greetingTimeout: SMTP_TIMEOUT_MS,
+      socketTimeout: SMTP_TIMEOUT_MS,
       auth: {
         user: env.mail.user,
         pass: env.mail.pass,
