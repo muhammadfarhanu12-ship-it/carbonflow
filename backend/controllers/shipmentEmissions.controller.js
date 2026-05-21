@@ -61,6 +61,31 @@ exports.updateStatus = async (req, res) => {
   });
 };
 
+exports.updateActivity = async (req, res) => {
+  const record = await EmissionRecordService.updateActivity(req.user.companyId, req.params.id, req.body, actorFromRequest(req));
+  req.io.emit("emissionActivityUpdated", record);
+  req.io.emit("ledgerUpdated", record);
+  return sendSuccess(res, {
+    message: "Emission record updated successfully",
+    data: record,
+  });
+};
+
+exports.recalculateRecord = async (req, res) => {
+  const record = await EmissionRecordService.recalculate(req.user.companyId, req.params.id, actorFromRequest(req), req.body?.reason || req.body?.editReason || null);
+  req.io.emit("emissionRecordStatusChanged", record);
+  req.io.emit("ledgerUpdated", record);
+  return sendSuccess(res, {
+    message: "Emission record recalculated successfully",
+    data: record,
+  });
+};
+
+exports.auditTimeline = async (req, res) => sendSuccess(res, {
+  message: "Emission record audit timeline fetched successfully",
+  data: await EmissionRecordService.getAuditTimeline(req.user.companyId, req.params.id, actorFromRequest(req)),
+});
+
 exports.previewImport = async (req, res) => {
   const result = await EmissionImportService.preview(req.body.csv, req.user.companyId);
   await AuditService.logForRequest(req, {

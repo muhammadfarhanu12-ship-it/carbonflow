@@ -11,6 +11,16 @@ export type Permission =
   | "supplier:evidence:verify"
   | "supplier:audit:view"
   | "factor:manage"
+  | "emission:view"
+  | "emission:create"
+  | "emission:update"
+  | "emission:submit"
+  | "emission:approve"
+  | "emission:archive"
+  | "emission:recalculate"
+  | "ledger:financial:create"
+  | "ledger:financial:update"
+  | "audit:view"
   | "report:generate"
   | "report:view"
   | "user:manage";
@@ -38,6 +48,16 @@ const ALL_PERMISSIONS: Permission[] = [
   "supplier:evidence:verify",
   "supplier:audit:view",
   "factor:manage",
+  "emission:view",
+  "emission:create",
+  "emission:update",
+  "emission:submit",
+  "emission:approve",
+  "emission:archive",
+  "emission:recalculate",
+  "ledger:financial:create",
+  "ledger:financial:update",
+  "audit:view",
   "report:generate",
   "report:view",
   "user:manage",
@@ -56,10 +76,20 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "supplier:evidence:view",
     "report:generate",
     "report:view",
+    "emission:view",
+    "emission:create",
+    "emission:update",
+    "emission:submit",
+    "emission:approve",
+    "emission:archive",
+    "emission:recalculate",
+    "ledger:financial:create",
+    "ledger:financial:update",
+    "audit:view",
   ],
-  data_entry: ["supplier:view", "supplier:create", "supplier:update", "supplier:evidence:view", "report:view"],
-  viewer: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "report:view"],
-  auditor: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "supplier:audit:view", "report:view"],
+  data_entry: ["supplier:view", "supplier:create", "supplier:update", "supplier:evidence:view", "report:view", "emission:view", "emission:create", "emission:update", "emission:submit"],
+  viewer: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "report:view", "emission:view"],
+  auditor: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "supplier:audit:view", "report:view", "emission:view", "audit:view"],
 };
 
 export const NO_PERMISSION_MESSAGE = "You do not have permission to perform this action.";

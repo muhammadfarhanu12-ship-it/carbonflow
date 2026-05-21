@@ -343,22 +343,38 @@ export interface EmissionRecord {
   shipmentId?: string | null;
   supplierId?: string | null;
   supplierName?: string | null;
+  supplierRiskLevel?: SupplierRiskLevel | null;
+  notes?: string | null;
   description?: string | null;
   amountTonnes: number;
   emissionsKgCo2e?: number;
   emissionsTCo2e?: number;
+  calculationStatus?: "calculated" | "missing_factor" | "draft_incomplete" | "calculation_error";
+  emissionFactorId?: string | null;
   costUsd: number;
   factorValue: number;
+  factorValueUsed?: number;
   factorUnit?: string | null;
+  factorUnitUsed?: string | null;
   factorSource?: string | null;
+  factorSourceName?: string | null;
   factorSourceYear?: number | null;
   factorRegion?: string | null;
   factorCountry?: string | null;
+  factorVersion?: string | null;
   factorIsSample?: boolean;
+  factorIsOfficial?: boolean;
+  factorIsCustom?: boolean;
+  formula?: string | null;
   activityAmount?: number;
   activityUnit?: string | null;
+  facilityName?: string | null;
+  facilityId?: string | null;
+  businessUnit?: string | null;
   reportingPeriod?: string | null;
-  dataStatus?: "draft" | "submitted" | "reviewed" | "approved" | "rejected" | "needs_correction";
+  reportingPeriodStart?: string | null;
+  reportingPeriodEnd?: string | null;
+  dataStatus?: "draft" | "submitted" | "reviewed" | "approved" | "rejected" | "needs_correction" | "archived";
   submittedBy?: string | null;
   submittedAt?: string | null;
   reviewedBy?: string | null;
@@ -369,21 +385,43 @@ export interface EmissionRecord {
   rejectedAt?: string | null;
   correctionNotes?: string | null;
   approvalNotes?: string | null;
+  archivedBy?: string | null;
+  archivedAt?: string | null;
+  factorStillActive?: boolean;
+  latestAvailableFactorId?: string | null;
+  latestAvailableFactorValue?: number | null;
+  latestAvailableFactorVersion?: string | null;
+  latestAvailableFactorSourceName?: string | null;
+  latestAvailableFactorSourceYear?: number | null;
+  latestAvailableFactorUnit?: string | null;
+  latestAvailableFactorIsSample?: boolean | null;
+  isStaleFactor?: boolean;
+  staleFactorReason?: string | null;
+  canRecalculateWithLatestFactor?: boolean;
   activityData?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   occurredAt: string;
   periodMonth: number;
   periodYear: number;
+  createdBy?: string | null;
+  updatedBy?: string | null;
+  createdAt?: string;
+  updatedAt?: string | null;
 }
 
 export interface LedgerEntry {
   id: string;
   companyId: string;
   shipmentId?: string | null;
+  emissionRecordId?: string | null;
   entryDate: string;
   category: "FREIGHT" | "OFFSET" | "TAX" | "ADJUSTMENT";
   description: string;
   logisticsCostUsd: number;
+  offsetCostUsd?: number;
+  internalCarbonPriceUsd?: number;
+  currency?: string;
+  supplierVendor?: string | null;
   emissionsTonnes: number;
   carbonTaxUsd: number;
   carbonCostUsd: number;
@@ -400,18 +438,49 @@ export interface LedgerSummary {
   scope1: number;
   scope2: number;
   scope3: number;
+  totalTco2e?: number;
+  scope1Tco2e?: number;
+  scope2Tco2e?: number;
+  scope3Tco2e?: number;
+  totalRecords?: number;
+  approvedRecords?: number;
+  draftRecords?: number;
+  submittedRecords?: number;
+  rejectedRecords?: number;
+  needsCorrectionRecords?: number;
+  reviewedRecords?: number;
+  archivedRecords?: number;
+  missingFactorRecords?: number;
+  sampleFactorRecords?: number;
+  zeroAmountRecords?: number;
+  calculationErrorRecords?: number;
+  supplierLinkedRecords?: number;
+  unlinkedSupplierRecords?: number;
+  missingFacilityRecords?: number;
+  missingReportingPeriodRecords?: number;
+  inclusionPolicy?: DashboardInclusionPolicy;
 }
 
 export interface LedgerBreakdowns {
   byCategory: Array<{ name: string; value: number }>;
-  bySupplier: Array<{ name: string; value: number }>;
-  byMonth: Array<{ name: string; scope1: number; scope2: number; scope3: number }>;
+  bySupplier: Array<{ supplierId?: string | null; name: string; value: number; recordCount?: number; sharePct?: number; riskLevel?: SupplierRiskLevel | null; category?: string | null; country?: string | null; linkStatus?: "linked" | "unverified" }>;
+  byMonth: Array<{ name: string; scope1: number; scope2: number; scope3: number; draftScope1?: number; draftScope2?: number; draftScope3?: number; missingFactorCount?: number }>;
 }
 
 export interface LedgerOverview extends PaginatedResponse<LedgerEntry> {
   records: EmissionRecord[];
   summary: LedgerSummary;
   breakdowns: LedgerBreakdowns;
+  categoryBreakdown?: Array<{ name: string; value: number }>;
+  supplierBreakdown?: LedgerBreakdowns["bySupplier"];
+  monthlyBreakdown?: LedgerBreakdowns["byMonth"];
+  financialExposure?: {
+    totalSpend: number;
+    carbonTax: number;
+    ledgerCarbonCost: number;
+    carbonCostRatio: number;
+  };
+  dataQualityIssues?: DashboardDataQualityIssue[];
 }
 
 export interface CarbonProject {

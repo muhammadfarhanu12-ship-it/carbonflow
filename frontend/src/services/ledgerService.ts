@@ -9,6 +9,12 @@ export interface LedgerPayload {
   description: string;
   logisticsCostUsd: number;
   emissionsTonnes?: number;
+  carbonTaxUsd?: number;
+  offsetCostUsd?: number;
+  internalCarbonPriceUsd?: number;
+  currency?: string;
+  supplierVendor?: string | null;
+  emissionRecordId?: string | null;
 }
 
 const EMPTY_LEDGER_SUMMARY = {
@@ -41,12 +47,45 @@ function normalizeLedgerOverview(payload: unknown): LedgerOverview {
       scope1: asNumber(summary.scope1),
       scope2: asNumber(summary.scope2),
       scope3: asNumber(summary.scope3),
+      totalTco2e: asNumber(summary.totalTco2e),
+      scope1Tco2e: asNumber(summary.scope1Tco2e),
+      scope2Tco2e: asNumber(summary.scope2Tco2e),
+      scope3Tco2e: asNumber(summary.scope3Tco2e),
+      totalRecords: asNumber(summary.totalRecords),
+      approvedRecords: asNumber(summary.approvedRecords),
+      draftRecords: asNumber(summary.draftRecords),
+      submittedRecords: asNumber(summary.submittedRecords),
+      reviewedRecords: asNumber(summary.reviewedRecords),
+      rejectedRecords: asNumber(summary.rejectedRecords),
+      needsCorrectionRecords: asNumber(summary.needsCorrectionRecords),
+      archivedRecords: asNumber(summary.archivedRecords),
+      missingFactorRecords: asNumber(summary.missingFactorRecords),
+      sampleFactorRecords: asNumber(summary.sampleFactorRecords),
+      zeroAmountRecords: asNumber(summary.zeroAmountRecords),
+      calculationErrorRecords: asNumber(summary.calculationErrorRecords),
+      supplierLinkedRecords: asNumber(summary.supplierLinkedRecords),
+      unlinkedSupplierRecords: asNumber(summary.unlinkedSupplierRecords),
+      missingFacilityRecords: asNumber(summary.missingFacilityRecords),
+      missingReportingPeriodRecords: asNumber(summary.missingReportingPeriodRecords),
+      inclusionPolicy: typeof summary.inclusionPolicy === "string" ? summary.inclusionPolicy as LedgerOverview["summary"]["inclusionPolicy"] : "approved_only",
     },
     breakdowns: {
       byCategory: asArray(breakdowns.byCategory),
       bySupplier: asArray(breakdowns.bySupplier),
       byMonth: asArray(breakdowns.byMonth),
     },
+    categoryBreakdown: asArray(source.categoryBreakdown),
+    supplierBreakdown: asArray(source.supplierBreakdown),
+    monthlyBreakdown: asArray(source.monthlyBreakdown),
+    financialExposure: isRecord(source.financialExposure)
+      ? {
+        totalSpend: asNumber(source.financialExposure.totalSpend),
+        carbonTax: asNumber(source.financialExposure.carbonTax),
+        ledgerCarbonCost: asNumber(source.financialExposure.ledgerCarbonCost),
+        carbonCostRatio: asNumber(source.financialExposure.carbonCostRatio),
+      }
+      : undefined,
+    dataQualityIssues: asArray(source.dataQualityIssues),
   };
 }
 

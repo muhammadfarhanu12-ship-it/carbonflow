@@ -1,6 +1,24 @@
 const EmissionRecordService = require("./emissionRecord.service");
 const { calculateActivityEmission } = require("./carbonEngine");
 
+const TEMPLATE_COLUMNS = [
+  "scope",
+  "category",
+  "activityType",
+  "activityAmount",
+  "activityUnit",
+  "factorKey",
+  "reportingPeriodStart",
+  "reportingPeriodEnd",
+  "activityDate",
+  "facility",
+  "businessUnit",
+  "country",
+  "region",
+  "supplier",
+  "notes",
+];
+
 const REQUIRED_COLUMNS = [
   "scope",
   "category",
@@ -9,11 +27,23 @@ const REQUIRED_COLUMNS = [
   "activityUnit",
   "reportingPeriodStart",
   "reportingPeriodEnd",
-  "facility",
-  "businessUnit",
-  "country",
-  "notes",
 ];
+
+const DEFAULT_FACTOR_KEYS_BY_ACTIVITY = {
+  stationary_fuel: "DIESEL",
+  mobile_fuel: "DIESEL",
+  fleet_distance: "DIESEL",
+  electricity: "GLOBAL",
+  purchased_heat: "GLOBAL",
+  business_travel_air: "BUSINESS_TRAVEL_AIR_KM",
+  employee_commuting_car: "EMPLOYEE_COMMUTING_CAR_KM",
+  purchased_goods_services: "PURCHASED_GOODS_USD",
+  capital_goods: "CAPITAL_GOODS_USD",
+  waste_landfill: "WASTE_LANDFILL_KG",
+  upstream_transportation: "UPSTREAM_TRANSPORTATION_TON_KM",
+  downstream_transportation: "DOWNSTREAM_TRANSPORTATION_TON_KM",
+  fuel_energy_related: "FUEL_ENERGY_RELATED_KWH",
+};
 
 function parseCsv(csv = "") {
   const lines = String(csv || "").split(/\r?\n/).filter((line) => line.trim());
@@ -68,13 +98,19 @@ function toReportingPeriod(start, end, fallback = "") {
   return fallback;
 }
 
+function inferFactorKey(row = {}) {
+  const explicit = row.factorKey || row.fuelType;
+  if (explicit) return explicit;
+  return DEFAULT_FACTOR_KEYS_BY_ACTIVITY[String(row.activityType || "").trim().toLowerCase()] || null;
+}
+
 class EmissionImportService {
   static getTemplate() {
     return [
-      REQUIRED_COLUMNS.concat(["fuelType"]).join(","),
-      "1,Stationary combustion,stationary_fuel,100,liter,2026-05-01,2026-05-31,Plant A,Operations,US,Boiler diesel use,DIESEL",
-      "2,Purchased electricity,electricity,1000,kWh,2026-05-01,2026-05-31,HQ,Operations,US,Grid electricity,GLOBAL",
-      "3,Business travel,business_travel_air,1500,km,2026-05-01,2026-05-31,HQ,Sales,US,Flight travel,BUSINESS_TRAVEL_AIR_KM",
+      TEMPLATE_COLUMNS.join(","),
+      "1,Stationary combustion,stationary_fuel,100,liter,DIESEL,2026-05-01,2026-05-31,2026-05-15,Plant A,Operations,US,GLOBAL,Acme Fuels,Boiler diesel use",
+      "2,Purchased electricity,electricity,1000,kWh,GLOBAL,2026-05-01,2026-05-31,2026-05-15,HQ,Operations,US,GLOBAL,Utility Provider,Grid electricity",
+      "3,Business travel,business_travel_air,1500,km,BUSINESS_TRAVEL_AIR_KM,2026-05-01,2026-05-31,2026-05-20,HQ,Sales,US,GLOBAL,Travel Vendor,Flight travel",
     ].join("\n");
   }
 
@@ -98,15 +134,19 @@ class EmissionImportService {
         activityType: row.activityType,
         activityAmount: Number(row.activityAmount),
         activityUnit: row.activityUnit,
-        factorKey: row.factorKey || row.fuelType || null,
+        factorKey: inferFactorKey(row),
         reportingPeriod: toReportingPeriod(row.reportingPeriodStart, row.reportingPeriodEnd, legacyReportingPeriod),
         reportingPeriodStart: row.reportingPeriodStart || null,
         reportingPeriodEnd: row.reportingPeriodEnd || null,
         fuelType: row.fuelType || row.factorKey || null,
-        occurredAt: row.reportingPeriodStart || row.occurredAt || null,
+        occurredAt: row.activityDate || row.occurredAt || row.reportingPeriodStart || null,
+        activityDate: row.activityDate || row.occurredAt || row.reportingPeriodStart || null,
         facilityName: row.facility || row.facilityName || null,
         businessUnit: row.businessUnit || null,
         country: row.country || null,
+        region: row.region || "GLOBAL",
+        supplier: row.supplier || row.supplierName || null,
+        supplierName: row.supplier || row.supplierName || null,
         description: row.notes || row.description || null,
         notes: row.notes || null,
       };
@@ -115,8 +155,10 @@ class EmissionImportService {
       if (!row.category) errors.push("category is required");
       if (!row.activityAmount) errors.push("activityAmount is required");
       if (!Number.isFinite(payload.activityAmount)) errors.push("activityAmount must be a number");
-      if (Number.isFinite(payload.activityAmount) && payload.activityAmount < 0) errors.push("activityAmount must be zero or greater");
+      if (Number.isFinite(payload.activityAmount) && payload.activityAmount <= 0) errors.push("activityAmount must be greater than 0");
       if (!row.activityUnit) errors.push("activityUnit is required");
+      if (!payload.factorKey) errors.push("factorKey is required");
+      if (!isValidDate(payload.activityDate)) errors.push("activityDate must be a valid date");
       if (!isValidDate(row.reportingPeriodStart)) errors.push("reportingPeriodStart must be a valid date");
       if (!isValidDate(row.reportingPeriodEnd)) errors.push("reportingPeriodEnd must be a valid date");
       if (isValidDate(row.reportingPeriodStart) && isValidDate(row.reportingPeriodEnd) && new Date(row.reportingPeriodEnd) < new Date(row.reportingPeriodStart)) {
@@ -155,6 +197,10 @@ class EmissionImportService {
       totalRows: rows.length,
       validRows: validRows.length,
       invalidRows: invalidRows.length,
+      missingFactorRows: results.filter((row) => row.errors.some((error) => /factor/i.test(error))).length,
+      sampleFactorRows: results.filter((row) => row.factor?.isSample).length,
+      estimatedKgCo2e: Number(results.reduce((sum, row) => sum + Number(row.calculation?.emissionsKgCo2e || 0), 0).toFixed(4)),
+      estimatedTCo2e: Number(results.reduce((sum, row) => sum + Number(row.calculation?.emissionsTCo2e || 0), 0).toFixed(4)),
       validRowItems: validRows,
       invalidRowItems: invalidRows,
       rows: results,

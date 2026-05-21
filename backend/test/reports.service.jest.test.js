@@ -1,6 +1,7 @@
 const ReportsService = require("../services/reports.service");
 const AuditService = require("../services/audit.service");
-const { Report } = require("../models");
+const { Report, EmissionRecord, Supplier, Shipment, Setting, Transaction } = require("../models");
+const DashboardService = require("../services/dashboard.service");
 
 function buildDataset() {
   return {
@@ -53,7 +54,14 @@ function buildDataset() {
     }],
     shipments: [],
     suppliers: [],
+    supplierBreakdown: [],
     offsetTransactions: [],
+    dataQualityNotes: {
+      sampleFactorRecords: 1,
+      missingFactorRecords: 0,
+      unapprovedRecords: 0,
+      statusSummary: { approved: 1 },
+    },
     recordSelection: "approved_only",
   };
 }
@@ -129,5 +137,83 @@ describe("ReportsService", () => {
 
     expect(csv).toContain("All records");
     expect(csv).toContain("This report includes unapproved records");
+  });
+
+  test("CSV report protects against spreadsheet formula injection", () => {
+    const csv = ReportsService.buildCsv({
+      name: "=Injected",
+      type: "ESG",
+      format: "CSV",
+      generatedAt: new Date("2026-05-18T00:00:00.000Z"),
+      metadata: { reportingPeriod: "2026-05" },
+    }, buildDataset());
+
+    expect(csv).toContain("\"'=Injected\"");
+  });
+
+  test("CSV report includes supplier breakdown and status summary", () => {
+    const csv = ReportsService.buildCsv({
+      name: "Supplier Report",
+      type: "ESG",
+      format: "CSV",
+      generatedAt: new Date("2026-05-18T00:00:00.000Z"),
+      metadata: { reportingPeriod: "2026-05" },
+    }, {
+      ...buildDataset(),
+      supplierBreakdown: [{
+        name: "Acme Fuels",
+        linkStatus: "linked",
+        category: "Fuel",
+        country: "US",
+        riskLevel: "MEDIUM",
+        recordCount: 2,
+        value: 1.4,
+        sharePct: 70,
+      }],
+      dataQualityNotes: {
+        sampleFactorRecords: 1,
+        missingFactorRecords: 1,
+        unapprovedRecords: 0,
+        statusSummary: { approved: 2 },
+      },
+    });
+
+    expect(csv).toContain("Supplier Breakdown");
+    expect(csv).toContain("Acme Fuels");
+    expect(csv).toContain("Missing Factor Warning");
+    expect(csv).toContain("Approved/Draft Status Summary");
+  });
+
+  test("buildDataset filters to approved records and aggregates linked suppliers", async () => {
+    jest.spyOn(DashboardService, "getMetrics").mockResolvedValue(buildDataset().dashboard);
+    jest.spyOn(Shipment, "find").mockReturnValue({ sort: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([]) }) });
+    jest.spyOn(Supplier, "find").mockReturnValue({ sort: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([{ _id: "supplier-1", name: "Acme Fuels", category: "Fuel", country: "US", riskLevel: "HIGH" }]) }) });
+    jest.spyOn(Setting, "findOne").mockResolvedValue({ companyName: "Acme Carbon" });
+    jest.spyOn(Transaction, "find").mockReturnValue({ sort: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([]) }) });
+    const recordFind = jest.spyOn(EmissionRecord, "find").mockReturnValue({
+      sort: jest.fn().mockReturnValue({
+        limit: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue([{
+            supplierId: "supplier-1",
+            dataStatus: "approved",
+            emissionsTCo2e: 2,
+            amountTonnes: 2,
+            factorValue: 0.2,
+            factorUnit: "kgCO2e/km",
+            factorIsSample: false,
+          }]),
+        }),
+      }),
+    });
+
+    const dataset = await ReportsService.buildDataset("company-1", { approvedOnly: true });
+
+    expect(recordFind).toHaveBeenCalledWith({ companyId: "company-1", dataStatus: "approved" });
+    expect(dataset.supplierBreakdown[0]).toEqual(expect.objectContaining({
+      name: "Acme Fuels",
+      value: 2,
+      recordCount: 1,
+      riskLevel: "HIGH",
+    }));
   });
 });

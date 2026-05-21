@@ -36,6 +36,9 @@ describe("enterprise audit logs", () => {
       activityType: "stationary_fuel",
       activityAmount: 100,
       activityUnit: "liter",
+      factorKey: "DIESEL",
+      reportingPeriod: "2026-05-01/2026-05-31",
+      activityDate: "2026-05-15",
     }, { id: "user-1", email: "user@example.com", ipAddress: "127.0.0.1", userAgent: "jest" });
 
     expect(auditSpy).toHaveBeenCalledWith(expect.objectContaining({

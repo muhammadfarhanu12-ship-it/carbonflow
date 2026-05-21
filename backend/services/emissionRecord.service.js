@@ -1,4 +1,4 @@
-const { EmissionRecord, EmissionFactor } = require("../models");
+const { EmissionRecord, EmissionFactor, Supplier, AuditLog, LedgerEntry, Report } = require("../models");
 const {
   calculateActivityEmission,
   calculateScope1,
@@ -14,8 +14,9 @@ const AuditService = require("./audit.service");
 const EmissionFactorService = require("./emissionFactor.service");
 const { hasPermission, normalizeRole } = require("../middlewares/rbac");
 
-const DATA_STATUSES = ["draft", "submitted", "reviewed", "approved", "rejected", "needs_correction"];
+const DATA_STATUSES = ["draft", "submitted", "reviewed", "approved", "rejected", "needs_correction", "archived"];
 const REVIEW_ROLES = new Set(["manager", "admin", "owner"]);
+const LOCKED_EDIT_STATUSES = new Set(["submitted", "reviewed", "approved"]);
 
 function getPeriod(occurredAt) {
   const date = new Date(occurredAt || Date.now());
@@ -32,6 +33,51 @@ function invalidateCompanyMetrics(companyId) {
   cache.removeByPrefix(`ledger:${companyId}:`);
 }
 
+function escapeRegex(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function toDateOrNull(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function compactAuditSummary(value = {}) {
+  if (!value || typeof value !== "object") return null;
+  const keys = [
+    "scope",
+    "category",
+    "activityAmount",
+    "activityUnit",
+    "factorValue",
+    "factorUnit",
+    "factorSource",
+    "factorSourceYear",
+    "factorVersion",
+    "factorIsSample",
+    "calculationStatus",
+    "emissionsKgCo2e",
+    "emissionsTCo2e",
+    "dataStatus",
+    "approvalNotes",
+    "correctionNotes",
+  ];
+  return keys.reduce((summary, key) => {
+    if (value[key] !== undefined) summary[key] = value[key];
+    return summary;
+  }, {});
+}
+
+function inferTimelineSource(log = {}) {
+  const action = String(log.action || "");
+  if (action.includes("csv_import")) return "CSV import";
+  if (action.includes("recalculated")) return "recalculation";
+  if (action.includes("report")) return "report";
+  if (log.details?.source) return log.details.source;
+  return "manual";
+}
+
 class EmissionRecordService {
   static async list(companyId, query = {}) {
     const filter = { companyId };
@@ -39,6 +85,31 @@ class EmissionRecordService {
     if (query.category) filter.category = query.category;
     if (query.status) filter.dataStatus = query.status;
     if (query.dataStatus) filter.dataStatus = query.dataStatus;
+    if (query.reportingPeriod) filter.reportingPeriod = { $regex: escapeRegex(query.reportingPeriod), $options: "i" };
+    if (query.facility || query.facilityName) filter.facilityName = { $regex: escapeRegex(query.facility || query.facilityName), $options: "i" };
+    if (query.businessUnit) filter.businessUnit = { $regex: escapeRegex(query.businessUnit), $options: "i" };
+    if (query.supplierId) filter.supplierId = query.supplierId;
+    if (query.createdBy) filter.createdBy = query.createdBy;
+    if (query.factorStatus === "missing" || query.missingFactor === "true") filter.$or = [{ factorValue: null }, { factorValue: 0 }, { factorUnit: null }];
+    if (query.factorStatus === "sample" || query.isSample === "true") filter.factorIsSample = true;
+    if (query.factorStatus === "custom" || query.isSample === "false") filter.factorIsSample = false;
+    if (query.activityDateFrom || query.activityDateTo) {
+      filter.occurredAt = {};
+      if (query.activityDateFrom) filter.occurredAt.$gte = new Date(query.activityDateFrom);
+      if (query.activityDateTo) filter.occurredAt.$lte = new Date(query.activityDateTo);
+    }
+    if (query.search) {
+      const regex = { $regex: escapeRegex(query.search), $options: "i" };
+      filter.$or = [
+        ...(filter.$or || []),
+        { category: regex },
+        { description: regex },
+        { facilityName: regex },
+        { businessUnit: regex },
+        { "metadata.factorKey": regex },
+        { "activityData.supplierName": regex },
+      ];
+    }
 
     const limit = Math.min(Math.max(Number(query.pageSize || 50), 1), 100);
     const page = Math.max(Number(query.page || 1), 1);
@@ -99,16 +170,66 @@ class EmissionRecordService {
     });
   }
 
+  static async buildFactorGovernance(record = {}, companyId) {
+    const currentFactorId = record.emissionFactorId || record.metadata?.emissionFactorId || record.metadata?.factorId || null;
+    const currentFactor = currentFactorId
+      ? await EmissionFactor.findOne({
+        _id: currentFactorId,
+        $or: [{ companyId }, { companyId: null }, { companyId: "" }],
+      }).lean()
+      : null;
+    const latest = await EmissionFactorService.resolveBestMatch({
+      companyId,
+      scope: record.scope,
+      category: record.category,
+      activityType: record.activityData?.activityType,
+      factorKey: record.metadata?.factorKey || record.activityData?.fuelType,
+      activityUnit: record.activityUnit,
+      country: record.factorCountry,
+      region: record.factorRegion || record.metadata?.region || "GLOBAL",
+      occurredAt: record.occurredAt,
+    });
+    const latestId = latest?._id || latest?.id || null;
+    const factorStillActive = currentFactor ? currentFactor.isActive !== false : Boolean(!currentFactorId && latest);
+    const staleReasons = [];
+    if (currentFactor && currentFactor.isActive === false) staleReasons.push("The factor used by this record is inactive.");
+    if (latestId && currentFactorId && String(latestId) !== String(currentFactorId)) staleReasons.push("A newer or better matching active factor is available.");
+    if (latest && !currentFactorId && record.factorIsSample === true && latest.isSample === false) staleReasons.push("An official/custom factor is now available for a record that used a sample factor.");
+    if (latest && record.factorVersion && latest.version && latest.version !== record.factorVersion) staleReasons.push("The available factor version differs from the stored snapshot.");
+    if (latest && Number(latest.factorValue ?? latest.value ?? 0) !== Number(record.factorValueUsed ?? record.factorValue ?? 0)) staleReasons.push("The available factor value differs from the stored snapshot.");
+
+    return {
+      factorStillActive,
+      latestAvailableFactorId: latestId,
+      latestAvailableFactorValue: latest ? Number(latest.factorValue ?? latest.value ?? 0) : null,
+      latestAvailableFactorVersion: latest?.version || null,
+      latestAvailableFactorSourceName: latest?.sourceName || latest?.source || null,
+      latestAvailableFactorSourceYear: latest?.sourceYear || null,
+      latestAvailableFactorUnit: latest?.factorUnit || null,
+      latestAvailableFactorIsSample: latest?.isSample ?? null,
+      isStaleFactor: staleReasons.length > 0,
+      staleFactorReason: staleReasons.join(" "),
+      canRecalculateWithLatestFactor: Boolean(latest && staleReasons.length > 0),
+    };
+  }
+
   static validateActivityPayload(payload = {}) {
     const errors = [];
     const scope = Number(payload.scope);
     const activityAmount = Number(payload.activityAmount ?? payload.amount);
+    const dataStatus = DATA_STATUSES.includes(payload.dataStatus) ? payload.dataStatus : "draft";
 
     if (![1, 2, 3].includes(scope)) errors.push("scope must be 1, 2, or 3");
     if (!payload.category) errors.push("category is required");
     if (!payload.activityType) errors.push("activityType is required");
     if (!payload.activityUnit && !payload.unit) errors.push("activityUnit is required");
     if (!Number.isFinite(activityAmount) || activityAmount < 0) errors.push("activityAmount must be a non-negative number");
+    if (Number.isFinite(activityAmount) && activityAmount === 0 && dataStatus !== "draft") errors.push("activityAmount must be greater than 0 unless saved as draft");
+    if (dataStatus !== "draft" && !payload.factorKey && !payload.fuelType && !Number.isFinite(Number(payload.factorValue))) errors.push("factorKey is required unless a custom factorValue is provided");
+    if (!payload.reportingPeriod && (!payload.reportingPeriodStart || !payload.reportingPeriodEnd)) errors.push("reportingPeriod is required");
+    if (!payload.occurredAt && !payload.activityDate) errors.push("activityDate is required");
+    if (payload.country && !/^[A-Za-z]{2,3}$/.test(String(payload.country).trim())) errors.push("country must be a 2 or 3 letter code when provided");
+    if (payload.region && String(payload.region).trim().length > 80) errors.push("region must be 80 characters or fewer");
 
     if (errors.length) {
       const error = new Error(errors.join("; "));
@@ -119,22 +240,43 @@ class EmissionRecordService {
 
   static async createActivity(companyId, payload, actor = null) {
     this.validateActivityPayload(payload);
+    const dataStatus = DATA_STATUSES.includes(payload.dataStatus) ? payload.dataStatus : "draft";
+    let linkedSupplier = null;
+    if (payload.supplierId) {
+      linkedSupplier = await Supplier.findOne({ _id: payload.supplierId, companyId })
+        .select("_id name category country riskLevel")
+        .lean();
+      if (!linkedSupplier) {
+        const error = new Error("Supplier not found for this company");
+        error.status = 404;
+        throw error;
+      }
+    }
     const factor = await this.resolveActivityFactor({ ...payload, companyId });
-    if (!factor && !Number.isFinite(Number(payload.factorValue))) {
+    if (!factor && !Number.isFinite(Number(payload.factorValue)) && dataStatus !== "draft") {
       const error = new Error("No emission factor found. Provide factorValue or configure an emission factor.");
       error.status = 422;
       throw error;
     }
 
-    const calculation = calculateActivityEmission(payload, factor);
+    const activityPayload = { ...payload, occurredAt: payload.occurredAt || payload.activityDate };
+    const calculation = calculateActivityEmission(activityPayload, factor);
     const recordKey = payload.recordKey || `activity:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
-    const dataStatus = DATA_STATUSES.includes(payload.dataStatus) ? payload.dataStatus : "draft";
     const now = new Date();
+    const factorValueUsed = calculation.factorValue;
+    const factorUnitUsed = calculation.factorUnit;
+    const factorSourceName = factor ? calculation.factorSource : null;
+    const formula = calculation.formula || "emissions = activityAmount x emissionFactor";
+    const calculationStatus = factor
+      ? calculation.calculationStatus
+      : dataStatus === "draft" ? "draft_incomplete" : "missing_factor";
     const record = await this.upsertRecord(companyId, recordKey, {
       scope: Number(payload.scope),
       category: String(payload.category).trim(),
       sourceType: payload.sourceType || "ACTIVITY",
       sourceId: payload.sourceId || null,
+      shipmentId: payload.shipmentId || null,
+      supplierId: linkedSupplier?._id || payload.supplierId || null,
       description: payload.description || `${payload.category} activity`,
       activityAmount: calculation.activityAmount,
       activityUnit: calculation.activityUnit,
@@ -142,33 +284,54 @@ class EmissionRecordService {
       emissionsKgCo2e: calculation.emissionsKgCo2e,
       emissionsTCo2e: calculation.emissionsTCo2e,
       factorValue: calculation.factorValue,
+      factorValueUsed,
       factorUnit: calculation.factorUnit,
-      factorSource: calculation.factorSource,
+      factorUnitUsed,
+      factorSource: factor ? calculation.factorSource : null,
+      factorSourceName,
       factorSourceYear: calculation.factorSourceYear,
       factorRegion: calculation.factorRegion,
       factorCountry: calculation.factorCountry,
-      factorIsSample: calculation.factorIsSample,
+      factorVersion: calculation.factorVersion,
+      factorIsSample: factor ? calculation.factorIsSample : false,
+      factorIsOfficial: factor ? calculation.factorIsOfficial : false,
+      factorIsCustom: factor ? calculation.factorIsCustom : false,
+      emissionFactorId: calculation.emissionFactorId,
+      calculationStatus,
+      formula,
       facilityId: payload.facilityId || null,
       facilityName: payload.facilityName || null,
       businessUnit: payload.businessUnit || null,
       reportingPeriod: payload.reportingPeriod || null,
+      reportingPeriodStart: payload.reportingPeriodStart ? new Date(payload.reportingPeriodStart) : null,
+      reportingPeriodEnd: payload.reportingPeriodEnd ? new Date(payload.reportingPeriodEnd) : null,
       dataStatus,
       submittedBy: dataStatus === "submitted" ? actor?.id || null : null,
       submittedAt: dataStatus === "submitted" ? now : null,
       createdBy: actor?.id || null,
+      updatedBy: actor?.id || null,
+      notes: payload.notes || null,
       activityData: {
         activityType: payload.activityType,
-        fuelType: payload.fuelType || null,
+        fuelType: payload.fuelType || payload.factorKey || null,
+        supplierName: linkedSupplier?.name || payload.supplier || payload.supplierName || null,
+        supplierCategory: linkedSupplier?.category || null,
+        supplierCountry: linkedSupplier?.country || null,
+        supplierRiskLevel: linkedSupplier?.riskLevel || null,
         method: payload.method || null,
         notes: payload.notes || null,
-        calculationFormula: "emissions = activityAmount x emissionFactor",
+        calculationFormula: formula,
       },
       metadata: {
         factorId: factor?._id || factor?.id || null,
+        emissionFactorId: factor?._id || factor?.id || null,
         factorKey: factor?.factorKey || factor?.key || payload.factorKey || payload.fuelType || null,
-        factorIsSample: calculation.factorIsSample,
+        factorIsSample: factor ? calculation.factorIsSample : false,
+        factorVersion: calculation.factorVersion,
+        factorIsOfficial: calculation.factorIsOfficial,
+        factorIsCustom: calculation.factorIsCustom,
       },
-      occurredAt: payload.occurredAt || new Date(),
+      occurredAt: payload.occurredAt || payload.activityDate || new Date(),
     });
 
     await AuditService.log({
@@ -211,6 +374,7 @@ class EmissionRecordService {
     const canReview = REVIEW_ROLES.has(role) && hasPermission(actor, "records:approve");
     const canSubmit = role === "data_entry" && hasPermission(actor, "records:edit");
     const isSubmitTransition = status === "submitted" && ["draft", "rejected", "needs_correction"].includes(currentStatus);
+    const isArchiveTransition = canReview && status === "archived";
     const isReviewTransition = canReview && (
       (currentStatus === "submitted" && ["reviewed", "approved", "rejected", "needs_correction"].includes(status))
       || (currentStatus === "reviewed" && ["approved", "rejected", "needs_correction"].includes(status))
@@ -218,7 +382,7 @@ class EmissionRecordService {
       || (currentStatus === "needs_correction" && status === "rejected")
     );
 
-    if (!(canSubmit && isSubmitTransition) && !isReviewTransition) {
+    if (!(canSubmit && isSubmitTransition) && !isReviewTransition && !isArchiveTransition) {
       const error = new Error(`Role ${role || "unknown"} cannot change emission record status from ${currentStatus} to ${status}`);
       error.status = canReview || canSubmit ? 422 : 403;
       throw error;
@@ -235,7 +399,8 @@ class EmissionRecordService {
       reviewed: "emission_record_reviewed",
       approved: "emission_record_approved",
       rejected: "emission_record_rejected",
-      needs_correction: "emission_record_updated",
+      needs_correction: "emission_record_needs_correction",
+      archived: "emission_record_archived",
     };
 
     const oldValue = {
@@ -250,9 +415,12 @@ class EmissionRecordService {
       rejectedAt: record.rejectedAt,
       approvalNotes: record.approvalNotes,
       correctionNotes: record.correctionNotes,
+      archivedBy: record.archivedBy,
+      archivedAt: record.archivedAt,
     };
     const changedAt = new Date();
     record.dataStatus = status;
+    record.updatedBy = actor?.id || null;
 
     if (status === "submitted") {
       record.submittedBy = actor?.id || null;
@@ -289,6 +457,14 @@ class EmissionRecordService {
       record.approvalNotes = null;
     }
 
+    if (status === "archived") {
+      record.reviewedBy = actor?.id || null;
+      record.reviewedAt = changedAt;
+      record.archivedBy = actor?.id || null;
+      record.archivedAt = changedAt;
+      record.correctionNotes = normalizedNotes || record.correctionNotes || null;
+    }
+
     await record.save();
     invalidateCompanyMetrics(companyId);
 
@@ -314,10 +490,336 @@ class EmissionRecordService {
         rejectedAt: record.rejectedAt,
         approvalNotes: record.approvalNotes,
         correctionNotes: record.correctionNotes,
+        archivedBy: record.archivedBy,
+        archivedAt: record.archivedAt,
       },
     });
 
     return record;
+  }
+
+  static async updateActivity(companyId, id, payload = {}, actor = null) {
+    const record = await EmissionRecord.findOne({ _id: id, companyId });
+    if (!record) {
+      const error = new Error("Emission record not found");
+      error.status = 404;
+      throw error;
+    }
+
+    const role = normalizeRole(actor?.role);
+    if (role === "data_entry" && record.createdBy && record.createdBy !== actor?.id) {
+      const error = new Error("Data entry users can only edit their own draft records");
+      error.status = 403;
+      throw error;
+    }
+    if (role === "data_entry" && record.dataStatus !== "draft") {
+      const error = new Error("Data entry users can only edit draft records");
+      error.status = 403;
+      throw error;
+    }
+
+    const currentStatus = record.dataStatus || "draft";
+    const editReason = String(payload.editReason || payload.reason || "").trim();
+    if (LOCKED_EDIT_STATUSES.has(currentStatus) && !editReason) {
+      const error = new Error("editReason is required when editing submitted, reviewed, or approved records");
+      error.status = 422;
+      throw error;
+    }
+
+    let linkedSupplier = null;
+    if (payload.supplierId || record.supplierId) {
+      const supplierId = payload.supplierId === "" ? null : (payload.supplierId ?? record.supplierId);
+      if (supplierId) {
+        linkedSupplier = await Supplier.findOne({ _id: supplierId, companyId }).select("_id name category country riskLevel").lean();
+        if (!linkedSupplier) {
+          const error = new Error("Supplier not found for this company");
+          error.status = 404;
+          throw error;
+        }
+      }
+    }
+
+    const nextPayload = {
+      scope: payload.scope ?? record.scope,
+      category: payload.category ?? record.category,
+      activityType: payload.activityType ?? record.activityData?.activityType,
+      activityAmount: payload.activityAmount ?? record.activityAmount,
+      activityUnit: payload.activityUnit ?? record.activityUnit,
+      factorKey: payload.factorKey ?? record.metadata?.factorKey ?? record.activityData?.fuelType,
+      fuelType: payload.factorKey ?? record.activityData?.fuelType,
+      country: payload.country ?? record.factorCountry,
+      region: payload.region ?? record.factorRegion ?? "GLOBAL",
+      reportingPeriod: payload.reportingPeriod ?? record.reportingPeriod,
+      reportingPeriodStart: payload.reportingPeriodStart ?? record.reportingPeriodStart,
+      reportingPeriodEnd: payload.reportingPeriodEnd ?? record.reportingPeriodEnd,
+      occurredAt: payload.occurredAt ?? payload.activityDate ?? record.occurredAt,
+      activityDate: payload.activityDate ?? payload.occurredAt ?? record.occurredAt,
+      dataStatus: currentStatus === "draft" ? "draft" : "needs_correction",
+    };
+    this.validateActivityPayload(nextPayload);
+
+    const factor = await this.resolveActivityFactor({ ...nextPayload, companyId });
+    const calculation = calculateActivityEmission(nextPayload, factor);
+    const oldValue = record.toObject();
+    const now = new Date();
+    const nextStatus = LOCKED_EDIT_STATUSES.has(currentStatus) ? "needs_correction" : currentStatus;
+
+    Object.assign(record, {
+      scope: Number(nextPayload.scope),
+      category: String(nextPayload.category || "").trim(),
+      supplierId: linkedSupplier?._id || (payload.supplierId === "" ? null : record.supplierId),
+      description: payload.description ?? record.description,
+      notes: payload.notes ?? record.notes,
+      activityAmount: calculation.activityAmount,
+      activityUnit: calculation.activityUnit,
+      amountTonnes: calculation.amountTonnes,
+      emissionsKgCo2e: calculation.emissionsKgCo2e,
+      emissionsTCo2e: calculation.emissionsTCo2e,
+      factorValue: calculation.factorValue,
+      factorValueUsed: calculation.factorValue,
+      factorUnit: calculation.factorUnit,
+      factorUnitUsed: calculation.factorUnit,
+      factorSource: factor ? calculation.factorSource : null,
+      factorSourceName: factor ? calculation.factorSource : null,
+      factorSourceYear: factor ? calculation.factorSourceYear : null,
+      factorRegion: nextPayload.region,
+      factorCountry: nextPayload.country || null,
+      factorVersion: calculation.factorVersion,
+      factorIsSample: factor ? calculation.factorIsSample : false,
+      factorIsOfficial: factor ? calculation.factorIsOfficial : false,
+      factorIsCustom: factor ? calculation.factorIsCustom : false,
+      emissionFactorId: calculation.emissionFactorId,
+      calculationStatus: factor ? calculation.calculationStatus : "missing_factor",
+      formula: calculation.formula,
+      facilityName: payload.facilityName ?? payload.facility ?? record.facilityName,
+      businessUnit: payload.businessUnit ?? record.businessUnit,
+      reportingPeriod: nextPayload.reportingPeriod,
+      reportingPeriodStart: toDateOrNull(nextPayload.reportingPeriodStart),
+      reportingPeriodEnd: toDateOrNull(nextPayload.reportingPeriodEnd),
+      occurredAt: toDateOrNull(nextPayload.occurredAt) || record.occurredAt,
+      dataStatus: nextStatus,
+      correctionNotes: nextStatus === "needs_correction" ? editReason : record.correctionNotes,
+      updatedBy: actor?.id || null,
+      activityData: {
+        ...(record.activityData || {}),
+        activityType: nextPayload.activityType,
+        fuelType: nextPayload.factorKey,
+        supplierName: linkedSupplier?.name || payload.supplierName || record.activityData?.supplierName || null,
+        supplierCategory: linkedSupplier?.category || record.activityData?.supplierCategory || null,
+        supplierCountry: linkedSupplier?.country || record.activityData?.supplierCountry || null,
+        supplierRiskLevel: linkedSupplier?.riskLevel || record.activityData?.supplierRiskLevel || null,
+        notes: payload.notes ?? record.activityData?.notes ?? null,
+        calculationFormula: calculation.formula,
+      },
+      metadata: {
+        ...(record.metadata || {}),
+        factorId: calculation.emissionFactorId,
+        emissionFactorId: calculation.emissionFactorId,
+        factorKey: nextPayload.factorKey,
+        factorVersion: calculation.factorVersion,
+        factorIsSample: factor ? calculation.factorIsSample : false,
+        factorIsOfficial: factor ? calculation.factorIsOfficial : false,
+        factorIsCustom: factor ? calculation.factorIsCustom : false,
+        lastEditReason: editReason || null,
+      },
+    });
+
+    await record.save();
+    invalidateCompanyMetrics(companyId);
+    await AuditService.log({
+      companyId,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      action: "emission_record_updated",
+      entityType: "EmissionRecord",
+      entityId: record.id,
+      ipAddress: actor?.ipAddress || null,
+      userAgent: actor?.userAgent || null,
+      oldValue,
+      newValue: record.toObject(),
+      details: {
+        reason: editReason || null,
+        previousStatus: currentStatus,
+        nextStatus,
+        source: "manual",
+      },
+    });
+    if (String(oldValue.supplierId || "") !== String(record.supplierId || "") && record.supplierId) {
+      await AuditService.log({
+        companyId,
+        userId: actor?.id || null,
+        userEmail: actor?.email || null,
+        action: "supplier_linked_to_emission_record",
+        entityType: "EmissionRecord",
+        entityId: record.id,
+        details: { supplierId: record.supplierId, supplierName: record.activityData?.supplierName || null },
+      });
+    }
+    if (String(oldValue.emissionFactorId || oldValue.metadata?.factorId || "") !== String(record.emissionFactorId || "")) {
+      await AuditService.log({
+        companyId,
+        userId: actor?.id || null,
+        userEmail: actor?.email || null,
+        action: "factor_replaced_on_record",
+        entityType: "EmissionRecord",
+        entityId: record.id,
+        oldValue: compactAuditSummary(oldValue),
+        newValue: compactAuditSummary(record.toObject()),
+        details: { reason: editReason || null },
+      });
+    }
+
+    return record;
+  }
+
+  static async recalculate(companyId, id, actor = null, reason = null) {
+    const record = await EmissionRecord.findOne({ _id: id, companyId });
+    if (!record) {
+      const error = new Error("Emission record not found");
+      error.status = 404;
+      throw error;
+    }
+
+    const payload = {
+      scope: record.scope,
+      category: record.category,
+      activityType: record.activityData?.activityType,
+      activityAmount: record.activityAmount,
+      activityUnit: record.activityUnit,
+      factorKey: record.metadata?.factorKey || record.activityData?.fuelType,
+      fuelType: record.activityData?.fuelType,
+      country: record.factorCountry,
+      region: record.factorRegion || "GLOBAL",
+      occurredAt: record.occurredAt,
+    };
+    const currentStatus = record.dataStatus || "draft";
+    const normalizedReason = String(reason || "").trim();
+    if (LOCKED_EDIT_STATUSES.has(currentStatus) && !normalizedReason) {
+      const error = new Error("reason is required when recalculating submitted, reviewed, or approved records");
+      error.status = 422;
+      throw error;
+    }
+    const factor = await this.resolveActivityFactor({ ...payload, companyId });
+    if (!factor) {
+      const error = new Error("No emission factor found for recalculation.");
+      error.status = 422;
+      throw error;
+    }
+    const calculation = calculateActivityEmission(payload, factor);
+    const oldValue = record.toObject();
+    Object.assign(record, {
+      amountTonnes: calculation.amountTonnes,
+      emissionsKgCo2e: calculation.emissionsKgCo2e,
+      emissionsTCo2e: calculation.emissionsTCo2e,
+      factorValue: calculation.factorValue,
+      factorValueUsed: calculation.factorValue,
+      factorUnit: calculation.factorUnit,
+      factorUnitUsed: calculation.factorUnit,
+      factorSource: calculation.factorSource,
+      factorSourceName: calculation.factorSource,
+      factorSourceYear: calculation.factorSourceYear,
+      factorRegion: calculation.factorRegion,
+      factorCountry: calculation.factorCountry,
+      factorVersion: calculation.factorVersion,
+      factorIsSample: calculation.factorIsSample,
+      factorIsOfficial: calculation.factorIsOfficial,
+      factorIsCustom: calculation.factorIsCustom,
+      emissionFactorId: calculation.emissionFactorId,
+      calculationStatus: calculation.calculationStatus,
+      formula: calculation.formula,
+      updatedBy: actor?.id || null,
+      metadata: {
+        ...(record.metadata || {}),
+        factorId: factor?._id || factor?.id || null,
+        emissionFactorId: factor?._id || factor?.id || null,
+        factorKey: factor?.factorKey || factor?.key || payload.factorKey || null,
+        factorIsSample: calculation.factorIsSample,
+        factorVersion: calculation.factorVersion,
+        factorIsOfficial: calculation.factorIsOfficial,
+        factorIsCustom: calculation.factorIsCustom,
+      },
+      dataStatus: LOCKED_EDIT_STATUSES.has(currentStatus) ? "needs_correction" : record.dataStatus,
+      correctionNotes: LOCKED_EDIT_STATUSES.has(currentStatus) ? normalizedReason : record.correctionNotes,
+    });
+    await record.save();
+    invalidateCompanyMetrics(companyId);
+    await AuditService.log({
+      companyId,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      action: "emission_record_recalculated",
+      entityType: "EmissionRecord",
+      entityId: record.id,
+      oldValue,
+      newValue: record.toObject(),
+      details: {
+        reason: normalizedReason || null,
+        source: "recalculation",
+      },
+    });
+    return record;
+  }
+
+  static async getAuditTimeline(companyId, id, actor = null) {
+    const record = await EmissionRecord.findOne({ _id: id, companyId }).lean();
+    if (!record) {
+      const error = new Error("Emission record not found");
+      error.status = 404;
+      throw error;
+    }
+    const [recordLogs, financialLogs, reportLogs] = await Promise.all([
+      AuditLog.find({ companyId, entityType: "EmissionRecord", entityId: id }).sort({ createdAt: 1 }).lean(),
+      LedgerEntry.find({ companyId, emissionRecordId: id }).select("_id createdAt updatedAt createdBy updatedBy description totalCostUsd").lean(),
+      Report.find({
+        companyId,
+        $or: [
+          { "metadata.generatedFrom": "carbon_ledger" },
+          { "metadata.recordIds": id },
+        ],
+      }).select("_id name generatedAt createdAt metadata").sort({ generatedAt: 1 }).lean(),
+    ]);
+
+    const items = recordLogs.map((log) => ({
+      id: log._id || log.id,
+      action: log.action,
+      timestamp: log.createdAt,
+      userId: log.userId || null,
+      userEmail: log.userEmail || null,
+      oldValueSummary: compactAuditSummary(log.oldValue),
+      newValueSummary: compactAuditSummary(log.newValue),
+      notes: log.details?.reason || log.details?.notes || log.newValue?.correctionNotes || log.newValue?.approvalNotes || null,
+      source: inferTimelineSource(log),
+    }));
+
+    financialLogs.forEach((entry) => {
+      items.push({
+        id: `financial:${entry._id || entry.id}`,
+        action: "financial_entry_linked",
+        timestamp: entry.createdAt,
+        userId: entry.createdBy || null,
+        userEmail: null,
+        oldValueSummary: null,
+        newValueSummary: { description: entry.description, totalCostUsd: entry.totalCostUsd },
+        notes: null,
+        source: "financial ledger",
+      });
+    });
+
+    reportLogs.forEach((report) => {
+      items.push({
+        id: `report:${report._id || report.id}`,
+        action: "report_generated_including_record",
+        timestamp: report.generatedAt || report.createdAt,
+        userId: report.metadata?.generatedBy || null,
+        userEmail: report.metadata?.generatedByEmail || null,
+        oldValueSummary: null,
+        newValueSummary: { reportName: report.name, inclusionPolicy: report.metadata?.recordSelection || report.metadata?.approvedOnly },
+        notes: null,
+        source: "report",
+      });
+    });
+
+    return items.sort((left, right) => new Date(left.timestamp || 0) - new Date(right.timestamp || 0));
   }
 
   static async upsertRecord(companyId, recordKey, payload) {
@@ -473,7 +975,7 @@ class EmissionRecordService {
   }
 
   static async getSummary(companyId) {
-    const records = await EmissionRecord.find({ companyId }).lean();
+    const records = await EmissionRecord.find({ companyId, dataStatus: "approved" }).lean();
 
     return records.reduce((accumulator, record) => {
       const amountTonnes = Number(record.amountTonnes || 0);

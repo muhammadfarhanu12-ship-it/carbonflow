@@ -16,10 +16,16 @@ export interface EmissionActivityPayload {
   businessUnit?: string;
   country?: string;
   region?: string;
+  supplier?: string;
+  supplierName?: string;
+  supplierId?: string | null;
+  shipmentId?: string | null;
   reportingPeriod?: string;
   reportingPeriodStart?: string | null;
   reportingPeriodEnd?: string | null;
   occurredAt?: string;
+  activityDate?: string;
+  dataStatus?: "draft" | "submitted";
 }
 
 export interface EmissionFactor {
@@ -44,6 +50,10 @@ export interface EmissionImportPreview {
   totalRows: number;
   validRows: number;
   invalidRows: number;
+  missingFactorRows?: number;
+  sampleFactorRows?: number;
+  estimatedKgCo2e?: number;
+  estimatedTCo2e?: number;
   rows: Array<{
     rowNumber: number;
     valid: boolean;
@@ -78,6 +88,18 @@ export interface EmissionImportPreview {
   createdCount?: number;
 }
 
+export interface AuditTimelineItem {
+  id: string;
+  action: string;
+  timestamp: string;
+  userId?: string | null;
+  userEmail?: string | null;
+  oldValueSummary?: Record<string, unknown> | null;
+  newValueSummary?: Record<string, unknown> | null;
+  notes?: string | null;
+  source: string;
+}
+
 export const emissionsService = {
   getActivities: async (params = ""): Promise<PaginatedResponse<EmissionRecord>> => (
     normalizePaginatedResponse<EmissionRecord>(await apiClient.get<unknown>(`/emissions${params}`))
@@ -92,7 +114,10 @@ export const emissionsService = {
   },
   matchFactor: (params = "") => apiClient.get<EmissionFactor | null>(`/emissions/factors/match${params}`),
   createActivity: (payload: EmissionActivityPayload) => apiClient.post<EmissionRecord>("/emissions/activities", payload),
+  updateActivity: (id: string, payload: Partial<EmissionActivityPayload> & { editReason?: string }) => apiClient.patch<EmissionRecord>(`/emissions/${id}`, payload),
   updateStatus: (id: string, dataStatus: string, notes?: string) => apiClient.patch<EmissionRecord>(`/emissions/${id}/status`, { dataStatus, notes }),
+  recalculate: (id: string, reason?: string) => apiClient.post<EmissionRecord>(`/emissions/${id}/recalculate`, { reason }),
+  getAuditTimeline: (id: string) => apiClient.get<AuditTimelineItem[]>(`/emissions/${id}/audit-timeline`),
   previewImport: (csv: string) => apiClient.post<EmissionImportPreview>("/emissions/import/preview", { csv }),
   commitImport: (csv: string) => apiClient.post<EmissionImportPreview>("/emissions/import/commit", { csv }),
 };

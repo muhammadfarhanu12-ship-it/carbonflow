@@ -9,6 +9,11 @@ function round(value, precision = 2) {
   return Math.round((Number(value || 0) + Number.EPSILON) * factor) / factor;
 }
 
+function sanitizeCsvCell(value) {
+  const text = String(value ?? "");
+  return /^[=+\-@]/.test(text) ? `'${text}` : text;
+}
+
 class ReportsService extends BaseService {
   static list(query = {}, companyId) {
     const filter = { companyId, ...this.getLikeFilter(["name", "type", "format"], query.search) };
@@ -27,9 +32,14 @@ class ReportsService extends BaseService {
       throw error;
     }
 
+    const recordSelection = payload.recordSelection || payload.metadata?.recordSelection || "approved_only";
+    const includeUnapproved = recordSelection === "all_records" || payload.metadata?.includeUnapproved === true;
+    const includeDrafts = includeUnapproved && payload.metadata?.includeDrafts === true;
     const metadata = {
       ...(payload.metadata || {}),
-      approvedOnly: payload.metadata?.includeUnapproved === true ? false : payload.metadata?.approvedOnly !== false,
+      recordSelection,
+      includeDrafts,
+      approvedOnly: includeUnapproved ? false : payload.metadata?.approvedOnly !== false,
     };
     if (metadata.approvedOnly === false) {
       metadata.warning = "This report includes unapproved emission records and is not enterprise-assurance ready.";
@@ -51,7 +61,7 @@ class ReportsService extends BaseService {
       companyId,
       userId: actor?.id || null,
       userEmail: actor?.email || null,
-      action: "report_generated",
+      action: metadata.generatedFrom === "carbon_ledger" ? "report_generated_from_ledger" : "report_generated",
       entityType: "Report",
       entityId: report.id,
       ipAddress: actor?.ipAddress || null,
@@ -149,14 +159,60 @@ class ReportsService extends BaseService {
   static async buildDataset(companyId, metadata = {}) {
     const approvedOnly = metadata.includeUnapproved === true ? false : metadata.approvedOnly !== false;
     const recordFilter = approvedOnly ? { companyId, dataStatus: "approved" } : { companyId };
+    if (!approvedOnly && metadata.includeDrafts === false) {
+      recordFilter.dataStatus = { $ne: "draft" };
+    }
+    if (metadata.periodStart || metadata.periodEnd) {
+      recordFilter.occurredAt = {};
+      if (metadata.periodStart) recordFilter.occurredAt.$gte = new Date(metadata.periodStart);
+      if (metadata.periodEnd) recordFilter.occurredAt.$lte = new Date(metadata.periodEnd);
+    }
     const [dashboard, shipments, suppliers, settings, offsetTransactions, emissionRecords] = await Promise.all([
       DashboardService.getMetrics(companyId),
       Shipment.find({ companyId }).sort({ createdAt: -1 }).limit(10),
       Supplier.find({ companyId }).sort({ createdAt: -1 }).limit(10),
       Setting.findOne({ companyId }),
       Transaction.find({ companyId, status: "COMPLETED" }).sort({ retiredAt: -1 }).limit(10),
-      EmissionRecord.find(recordFilter).sort({ occurredAt: -1 }).limit(100).lean(),
+      EmissionRecord.find(recordFilter).sort({ occurredAt: -1 }).limit(500).lean(),
     ]);
+    const supplierMap = new Map(suppliers.map((supplier) => [String(supplier._id || supplier.id), supplier]));
+    const totalEmissions = emissionRecords.reduce((sum, record) => sum + Number(record.emissionsTCo2e ?? record.amountTonnes ?? 0), 0);
+    const supplierBreakdownMap = new Map();
+    emissionRecords.forEach((record) => {
+      const amount = Number(record.emissionsTCo2e ?? record.amountTonnes ?? 0);
+      if (!record.supplierId && !record.activityData?.supplierName) return;
+      const linked = Boolean(record.supplierId);
+      const key = linked ? String(record.supplierId) : `metadata:${record.activityData?.supplierName}`;
+      const supplier = linked ? supplierMap.get(key) : null;
+      const bucket = supplierBreakdownMap.get(key) || {
+        supplierId: linked ? key : null,
+        name: supplier?.name || record.activityData?.supplierName || "Unverified supplier link",
+        category: supplier?.category || record.activityData?.supplierCategory || null,
+        country: supplier?.country || record.activityData?.supplierCountry || null,
+        riskLevel: supplier?.riskLevel || record.activityData?.supplierRiskLevel || null,
+        linkStatus: linked ? "linked" : "unverified",
+        value: 0,
+        recordCount: 0,
+        sharePct: 0,
+      };
+      bucket.value = round(bucket.value + amount);
+      bucket.recordCount += 1;
+      supplierBreakdownMap.set(key, bucket);
+    });
+    const supplierBreakdown = Array.from(supplierBreakdownMap.values())
+      .map((item) => ({ ...item, sharePct: totalEmissions ? round((item.value / totalEmissions) * 100, 2) : 0 }))
+      .sort((left, right) => right.value - left.value);
+    const governance = await Promise.all(emissionRecords.map((record) => (
+      require("./emissionRecord.service").buildFactorGovernance(record, companyId)
+    )));
+    const staleFactorRecords = governance.filter((item) => item.isStaleFactor).length;
+    const statusSummary = emissionRecords.reduce((accumulator, record) => {
+      const status = record.dataStatus || "draft";
+      accumulator[status] = (accumulator[status] || 0) + 1;
+      return accumulator;
+    }, {});
+    const sampleFactorRecords = emissionRecords.filter((record) => record.factorIsSample === true).length;
+    const missingFactorRecords = emissionRecords.filter((record) => !record.factorValue || !record.factorUnit).length;
 
     return {
       dashboard: this.buildDashboardForReport(dashboard, emissionRecords),
@@ -165,11 +221,27 @@ class ReportsService extends BaseService {
       settings,
       offsetTransactions,
       emissionRecords,
+      supplierBreakdown,
+      dataQualityNotes: {
+        sampleFactorRecords,
+        missingFactorRecords,
+        staleFactorRecords,
+        unapprovedRecords: emissionRecords.filter((record) => record.dataStatus !== "approved").length,
+        statusSummary,
+      },
       recordSelection: approvedOnly ? "approved_only" : "all_records",
     };
   }
 
   static buildCsv(report, dataset) {
+    const dataQualityNotes = dataset.dataQualityNotes || {
+      sampleFactorRecords: 0,
+      missingFactorRecords: 0,
+      staleFactorRecords: 0,
+      unapprovedRecords: 0,
+      statusSummary: {},
+    };
+    const supplierBreakdown = dataset.supplierBreakdown || [];
     const summaryRows = [
       ["Report Name", report.name],
       ["Type", report.type],
@@ -179,6 +251,9 @@ class ReportsService extends BaseService {
       ["Reporting Period", report.metadata?.period || report.metadata?.reportingPeriod || "All available records"],
       ["Record Selection", dataset.recordSelection === "approved_only" ? "Approved records only" : "All records"],
       ...(dataset.recordSelection === "approved_only" ? [] : [["Warning", "This report includes unapproved records and should not be used for final enterprise reporting without review."]]),
+      ...(dataQualityNotes.sampleFactorRecords ? [["Sample Factor Warning", `${dataQualityNotes.sampleFactorRecords} records use sample factors. Do not present sample factors as official.`]] : []),
+      ...(dataQualityNotes.missingFactorRecords ? [["Missing Factor Warning", `${dataQualityNotes.missingFactorRecords} records are missing factor data.`]] : []),
+      ...(dataQualityNotes.staleFactorRecords ? [["Stale Factor Warning", `${dataQualityNotes.staleFactorRecords} records use inactive or outdated factor snapshots.`]] : []),
       ["Total Emissions (tCO2e)", dataset.dashboard.summary.totalEmissions],
       ["Scope 1 (tCO2e)", dataset.dashboard.summary.scope1],
       ["Scope 2 (tCO2e)", dataset.dashboard.summary.scope2],
@@ -209,6 +284,23 @@ class ReportsService extends BaseService {
         month.cost,
       ]),
       [],
+      ["Supplier Breakdown"],
+      ["Supplier", "Link Status", "Category", "Country", "Risk Level", "Record Count", "Total tCO2e", "Share %"],
+      ...supplierBreakdown.map((supplier) => [
+        supplier.name,
+        supplier.linkStatus,
+        supplier.category || "",
+        supplier.country || "",
+        supplier.riskLevel || "",
+        supplier.recordCount,
+        supplier.value,
+        supplier.sharePct,
+      ]),
+      [],
+      ["Approved/Draft Status Summary"],
+      ["Status", "Record Count"],
+      ...Object.entries(dataQualityNotes.statusSummary).map(([status, count]) => [status, count]),
+      [],
       ["Methodology"],
       ["Formula", "emissions = activity data x emission factor"],
       ["Output Units", "kgCO2e and tCO2e"],
@@ -217,13 +309,14 @@ class ReportsService extends BaseService {
       ["Data Quality", `${dataset.dashboard.dataQuality.completedSignals}/${dataset.dashboard.dataQuality.requiredSignals} completeness signals available; ${dataset.dashboard.dataQuality.sampleFactorRecords} records use sample factors.`],
       [],
       ["Emission Activity Calculation Detail"],
-      ["Date", "Reporting Period", "Status", "Scope", "Category", "Activity Amount", "Activity Unit", "Emission Factor", "Factor Unit", "Factor Source", "Factor Year", "Factor Region", "Factor Country", "Sample Factor", "Formula", "kgCO2e", "tCO2e"],
+      ["Date", "Reporting Period", "Status", "Scope", "Category", "Supplier", "Activity Amount", "Activity Unit", "Emission Factor", "Factor Unit", "Factor Source", "Factor Year", "Factor Region", "Factor Country", "Sample Factor", "Formula", "kgCO2e", "tCO2e"],
       ...dataset.emissionRecords.map((record) => [
         record.occurredAt ? new Date(record.occurredAt).toISOString() : "",
         record.reportingPeriod || `${record.periodYear || ""}-${String(record.periodMonth || "").padStart(2, "0")}`,
         record.dataStatus || "draft",
         `Scope ${record.scope}`,
         record.category,
+        record.activityData?.supplierName || "",
         record.activityAmount ?? record.activityData?.electricityKwh ?? record.activityData?.tonKm ?? "",
         record.activityUnit || record.factorUnit || "",
         record.factorValue,
@@ -276,11 +369,18 @@ class ReportsService extends BaseService {
     ];
 
     return summaryRows
-      .map((row) => row.map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(","))
+      .map((row) => row.map((value) => `"${sanitizeCsvCell(value).replace(/"/g, '""')}"`).join(","))
       .join("\n");
   }
 
   static buildPdf(report, dataset) {
+    const dataQualityNotes = dataset.dataQualityNotes || {
+      sampleFactorRecords: 0,
+      missingFactorRecords: 0,
+      unapprovedRecords: 0,
+      statusSummary: {},
+    };
+    const supplierBreakdown = dataset.supplierBreakdown || [];
     return new Promise((resolve) => {
       const doc = new PDFDocument({ margin: 50 });
       const chunks = [];
@@ -329,6 +429,21 @@ class ReportsService extends BaseService {
         doc.text(`${month.name} | S1 ${month.scope1} | S2 ${month.scope2} | S3 ${month.scope3} | Emissions ${month.emissions} tCO2e | Cost $${month.cost}`);
       });
       doc.moveDown();
+      doc.fontSize(14).text("Supplier Breakdown");
+      doc.fontSize(10);
+      if (!supplierBreakdown.length) {
+        doc.text("No supplier-linked records in this report.");
+      }
+      supplierBreakdown.forEach((supplier) => {
+        doc.text(`${supplier.name} | ${supplier.linkStatus} | ${supplier.value} tCO2e | ${supplier.recordCount} records | ${supplier.sharePct}% | Risk ${supplier.riskLevel || "-"}`);
+      });
+      doc.moveDown();
+      doc.fontSize(14).text("Approved/Draft Status Summary");
+      doc.fontSize(10);
+      Object.entries(dataQualityNotes.statusSummary).forEach(([status, count]) => {
+        doc.text(`${status}: ${count}`);
+      });
+      doc.moveDown();
       doc.fontSize(14).text("Recent Shipments");
       doc.fontSize(10);
       dataset.shipments.forEach((shipment) => {
@@ -356,6 +471,14 @@ class ReportsService extends BaseService {
       doc.fontSize(10);
       doc.text("CarbonFlow sample factors are MVP placeholders. Replace them with official DEFRA, EPA, IPCC, GHG Protocol, grid, supplier, or assured internal factors before formal reporting.");
       doc.text("This MVP uses sample emission factors. Replace with official factors before production use.");
+      if (dataQualityNotes.missingFactorRecords) {
+        doc.fillColor("#991b1b").text(`Missing factor warning: ${dataQualityNotes.missingFactorRecords} records are missing factor data.`);
+        doc.fillColor("#111827");
+      }
+      if (dataQualityNotes.staleFactorRecords) {
+        doc.fillColor("#92400e").text(`Stale factor warning: ${dataQualityNotes.staleFactorRecords} records use inactive or outdated factor snapshots.`);
+        doc.fillColor("#111827");
+      }
       doc.moveDown();
       doc.fontSize(14).text("Data Quality Notes");
       doc.fontSize(10);

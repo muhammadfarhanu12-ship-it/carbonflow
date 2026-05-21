@@ -186,6 +186,34 @@ describe("enterprise production readiness", () => {
     expect(selected.id).toBe("diesel");
   });
 
+  test("factor resolver scopes custom factors to requesting company or global factors", async () => {
+    const findSpy = jest.spyOn(EmissionFactor, "find").mockReturnValue({
+      lean: jest.fn().mockResolvedValue([]),
+    });
+
+    await EmissionRecordService.resolveActivityFactor({
+      companyId: "company-a",
+      scope: 1,
+      category: "Stationary combustion",
+      activityType: "stationary_fuel",
+      factorKey: "DIESEL",
+      activityUnit: "liter",
+      region: "GLOBAL",
+    });
+
+    expect(findSpy).toHaveBeenCalledWith(expect.objectContaining({
+      $and: expect.arrayContaining([
+        expect.objectContaining({
+          $or: expect.arrayContaining([
+            { companyId: "company-a" },
+            { companyId: null },
+            { companyId: "" },
+          ]),
+        }),
+      ]),
+    }));
+  });
+
   test("does not select inactive factors", () => {
     const selected = selectBestMatchingFactor([
       {
@@ -448,6 +476,10 @@ describe("enterprise production readiness", () => {
 
   test("RBAC denies viewers from creating records and allows data entry", () => {
     expect(hasPermission({ role: "viewer" }, "records:create")).toBe(false);
+    expect(hasPermission({ role: "viewer" }, "records:edit")).toBe(false);
+    expect(hasPermission({ role: "viewer" }, "report:generate")).toBe(false);
+    expect(hasPermission({ role: "auditor" }, "emission:update")).toBe(false);
+    expect(hasPermission({ role: "auditor" }, "audit:view")).toBe(true);
     expect(hasPermission({ role: "data_entry" }, "records:create")).toBe(true);
   });
 });
