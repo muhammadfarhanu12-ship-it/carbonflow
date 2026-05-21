@@ -4,7 +4,7 @@ const { sendSuccess } = require("../utils/apiResponse");
 exports.getMetrics = async (req, res) => {
   return sendSuccess(res, {
     message: "Dashboard metrics fetched successfully",
-    data: await DashboardService.getMetrics(req.user.companyId),
+    data: await DashboardService.getMetrics(req.user.companyId, req.query),
   });
 };
 

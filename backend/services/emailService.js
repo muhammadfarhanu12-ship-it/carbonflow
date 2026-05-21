@@ -108,6 +108,86 @@ function buildEmailVerificationTemplate({ name, fullName, verificationUrl }) {
   };
 }
 
+function buildSupplierQuestionnaireTemplate({
+  supplierName,
+  companyName,
+  dueDate,
+  questionnaireUrl,
+}) {
+  const safeSupplierName = escapeHtml(supplierName || "Supplier");
+  const safeCompanyName = escapeHtml(companyName || "your customer");
+  const safeDueDate = escapeHtml(dueDate ? new Date(dueDate).toLocaleDateString("en-US") : "Not specified");
+  const safeQuestionnaireUrl = escapeHtml(questionnaireUrl);
+  const requestedData = [
+    "Annual Scope 1, 2, and relevant Scope 3 emissions",
+    "Revenue or activity denominator for intensity calculation",
+    "ISO 14001, SBTi, and other ESG evidence where available",
+    "Reporting period, verification status, and data quality notes",
+  ];
+  const text = [
+    `Hello ${supplierName || "Supplier"},`,
+    "",
+    `${companyName || "Your customer"} is requesting ESG and emissions data through CarbonFlow.`,
+    "",
+    "Requested data:",
+    ...requestedData.map((item) => `- ${item}`),
+    "",
+    `Due date: ${safeDueDate}`,
+    questionnaireUrl ? `Questionnaire link: ${questionnaireUrl}` : "Questionnaire link: unavailable",
+    "",
+    "Security note: this secure link is unique to your supplier questionnaire. Do not forward it outside your organization.",
+    "If you need help, reply to this email or contact your customer sustainability contact.",
+    "CarbonFlow support note: provide the best available data and attach evidence where possible.",
+  ].join("\n");
+
+  return {
+    subject: `${safeCompanyName} requested supplier ESG data in CarbonFlow`,
+    text,
+    html: `
+      <div style="background:#f3f4f6;padding:24px 12px;font-family:Arial,sans-serif;color:#111827;">
+        <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+          <div style="background:#16a34a;color:#ffffff;padding:18px 24px;">
+            <div style="font-size:13px;letter-spacing:.12em;text-transform:uppercase;font-weight:700;">CarbonFlow</div>
+            <h2 style="margin:6px 0 0;font-size:22px;line-height:1.3;">Supplier ESG questionnaire</h2>
+          </div>
+          <div style="padding:24px;">
+            <p style="margin:0 0 12px;">Hello ${safeSupplierName},</p>
+            <p style="margin:0 0 16px;line-height:1.6;">
+              ${safeCompanyName} is requesting supplier ESG and emissions data through CarbonFlow.
+            </p>
+            <div style="margin:0 0 18px;padding:14px;border:1px solid #d1fae5;background:#ecfdf5;border-radius:10px;">
+              <p style="margin:0 0 8px;font-weight:700;">Requested data</p>
+              <ul style="margin:0;padding-left:20px;line-height:1.6;">
+                ${requestedData.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+              </ul>
+            </div>
+            <p style="margin:0 0 16px;"><strong>Due date:</strong> ${safeDueDate}</p>
+            ${questionnaireUrl ? `
+              <p style="margin:0 0 18px;">
+                <a href="${safeQuestionnaireUrl}" style="display:inline-block;padding:12px 18px;background:#16a34a;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">
+                  Open Questionnaire
+                </a>
+              </p>
+              <p style="margin:0 0 16px;word-break:break-all;font-size:13px;color:#065f46;">
+                ${safeQuestionnaireUrl}
+              </p>
+            ` : ""}
+            <p style="margin:0 0 8px;font-size:13px;color:#4b5563;">
+              Security note: this link is unique to your supplier questionnaire. Do not forward it outside your organization.
+            </p>
+            <p style="margin:0 0 8px;font-size:13px;color:#4b5563;">
+              Support note: provide the best available data and attach evidence where possible.
+            </p>
+            <p style="margin:0;font-size:13px;color:#4b5563;">
+              If you need help, reply to this email or contact your customer sustainability contact.
+            </p>
+          </div>
+        </div>
+      </div>
+    `,
+  };
+}
+
 function buildBudgetIncreaseTemplate({
   requesterName,
   requesterEmail,
@@ -182,9 +262,22 @@ async function sendBudgetIncreaseRequestEmail(payload) {
   });
 }
 
+async function sendSupplierQuestionnaireEmail(payload) {
+  const template = buildSupplierQuestionnaireTemplate(payload);
+
+  return sendEmail({
+    to: payload.to,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
+  });
+}
+
 module.exports = {
   sendResetPasswordEmail,
   sendWelcomeEmail,
   sendEmailVerificationEmail,
   sendBudgetIncreaseRequestEmail,
+  sendSupplierQuestionnaireEmail,
+  buildSupplierQuestionnaireTemplate,
 };

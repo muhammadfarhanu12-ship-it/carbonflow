@@ -256,12 +256,15 @@ function buildShipmentDocument(row, supplier, companyId, settings, metadata) {
     origin: row.origin || DEFAULT_ORIGIN,
     destination: row.destination,
     distanceKm: Number(row.distanceKm || 0),
+    distanceUnit: "km",
     transportMode: row.transportMode,
     carrier: row.carrier || DEFAULT_CARRIER,
     vehicleType: row.vehicleType || null,
     fuelType: row.fuelType || null,
     weightKg: Number(row.weightKg),
+    weightUnit: "kg",
     costUsd: Number(row.costUsd || 0),
+    currency: "USD",
     carbonPricePerTon: Number(settings.carbonPricePerTon || 0),
     status: row.status || "IN_TRANSIT",
     shipmentDate,
@@ -281,6 +284,10 @@ function buildShipmentDocument(row, supplier, companyId, settings, metadata) {
   return {
     ...baseDocument,
     emissionsTonnes: calculatedFields.emissionsTonnes,
+    emissionsKgCo2e: calculatedFields.emissionsKgCo2e,
+    emissionFactor: calculatedFields.emissionFactor,
+    factorSource: calculatedFields.factorSource,
+    calculationStatus: calculatedFields.calculationStatus,
     carbonCostUsd: calculatedFields.carbonCostUsd,
   };
 }

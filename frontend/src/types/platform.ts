@@ -1,8 +1,30 @@
 export type UserRole = "SUPERADMIN" | "ADMIN" | "MANAGER" | "ANALYST" | "USER" | "OWNER" | "DATA_ENTRY" | "VIEWER" | "AUDITOR";
-export type SupplierRiskLevel = "LOW" | "MEDIUM" | "HIGH";
+export type SupplierRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type SupplierInsightType = "warning" | "info";
 export type SupplierBenchmarkComparison = "ABOVE_AVERAGE" | "AT_AVERAGE" | "BELOW_AVERAGE" | "UNKNOWN";
-export type VerificationStatus = "VERIFIED" | "PENDING" | "ACTION_REQUIRED";
+export type VerificationStatus =
+  | "pending"
+  | "self_reported"
+  | "third_party_verified"
+  | "expired"
+  | "rejected"
+  | "VERIFIED"
+  | "PENDING"
+  | "ACTION_REQUIRED";
+export type SupplierStatus = "draft" | "invited" | "submitted" | "under_review" | "verified" | "rejected" | "needs_update" | "approved" | "high_risk" | "archived";
+export type SupplierInvitationStatus = "not_sent" | "sent" | "opened" | "submitted" | "overdue" | "expired" | "SENT" | "ACCEPTED" | "NOT_SENT";
+export type SupplierQuestionnaireStatus = "not_sent" | "sent" | "opened" | "submitted" | "overdue" | "expired";
+export type SupplierEvidenceType =
+  | "iso_14001_certificate"
+  | "sbti_commitment"
+  | "ghg_inventory"
+  | "esg_report"
+  | "audit_report"
+  | "utility_fuel_data"
+  | "carbon_reduction_plan"
+  | "supplier_questionnaire_answers"
+  | "other";
+export type SupplierEvidenceStatus = "requested" | "submitted" | "under_review" | "verified" | "rejected" | "expired";
 export type ShipmentStatus = "PLANNED" | "IN_TRANSIT" | "DELAYED" | "DELIVERED";
 export type TransportMode = "ROAD" | "RAIL" | "AIR" | "OCEAN";
 export type MarketplaceListingStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED" | "SOLD_OUT";
@@ -44,8 +66,16 @@ export interface AuthResponse {
 
 export interface SupplierScoreBreakdown {
   emissionScore: number;
+  emissionsScore?: number;
+  emissionWeightedScore?: number;
   certificationScore: number;
+  certificationWeightedScore?: number;
   transparencyScore: number;
+  transparencyWeightedScore?: number;
+  complianceScore?: number;
+  reportingFreshnessScore?: number;
+  dataQualityScore?: number;
+  categoryRegionRiskScore?: number;
 }
 
 export interface SupplierScoreInsight {
@@ -61,6 +91,42 @@ export interface SupplierBenchmark {
   industryComparison: SupplierBenchmarkComparison;
   isAboveIndustryAverage: boolean | null;
   variancePct: number | null;
+  categoryAverageIntensity?: number | null;
+  regionAverageIntensity?: number | null;
+  companyAverageIntensity?: number | null;
+  bestPerformerIntensity?: number | null;
+  worstPerformerIntensity?: number | null;
+  percentile?: number | null;
+  benchmarkLabel?: SupplierBenchmarkComparison | "UNAVAILABLE";
+  comparisonMessage?: string;
+  isBenchmarkAvailable?: boolean;
+  bestPerformerSupplierId?: string | null;
+  bestPerformerSupplierName?: string | null;
+  worstPerformerSupplierId?: string | null;
+  worstPerformerSupplierName?: string | null;
+  categorySupplierCount?: number;
+  regionSupplierCount?: number;
+  categoryComparison?: SupplierBenchmarkComparison;
+  regionComparison?: SupplierBenchmarkComparison;
+  companyComparison?: SupplierBenchmarkComparison;
+  isBestInClass?: boolean;
+  isAboveCategoryAverage?: boolean | null;
+  benchmarkSource?: "internal_company_data" | "uploaded_benchmark_dataset" | "external_provider" | "unavailable";
+  benchmarkSourceName?: string | null;
+  benchmarkSourceYear?: number | null;
+  benchmarkSourceVersion?: string | null;
+  benchmarkProvider?: string | null;
+  benchmarkIsOfficial?: boolean;
+  benchmarkIsSample?: boolean;
+  benchmarkWarning?: string | null;
+  benchmarkMetadata?: {
+    medianIntensity?: number | null;
+    percentile25?: number | null;
+    percentile75?: number | null;
+    country?: string | null;
+    region?: string | null;
+    industryCode?: string | null;
+  };
 }
 
 export interface SupplierScoreResult {
@@ -73,7 +139,17 @@ export interface SupplierScoreResult {
   intensitySource: "computed" | "provided" | "unavailable";
   breakdown: SupplierScoreBreakdown;
   benchmark: SupplierBenchmark;
+  complianceScore?: number;
+  certificationScore?: number;
+  transparencyScore?: number;
+  reportingFreshnessScore?: number;
+  dataQualityScore?: number;
+  benchmarkScore?: number | null;
+  latestScoreExplanation?: string;
+  explanation?: string;
+  recommendedActions?: string[];
   insights: SupplierScoreInsight[];
+  evidenceSummary?: SupplierEvidenceSummary | null;
   calculatedAt: string;
 }
 
@@ -95,8 +171,10 @@ export interface Supplier {
   country: string;
   region: string;
   category: string;
+  status?: SupplierStatus;
   emissionFactor: number;
   emissionIntensity: number;
+  intensityUnit?: string;
   complianceScore: number;
   countryRiskIndex: number;
   verificationStatus: VerificationStatus;
@@ -104,7 +182,9 @@ export interface Supplier {
   renewableRatio: number;
   complianceFlags: number;
   totalEmissions: number;
+  totalEmissionsTco2e?: number;
   revenue?: number | null;
+  revenueOrActivityBase?: number | null;
   hasISO14001: boolean;
   hasSBTi: boolean;
   dataTransparencyScore: number;
@@ -116,14 +196,98 @@ export interface Supplier {
   supplierScoreBreakdown?: SupplierScoreBreakdown;
   supplierScoreInsights?: SupplierScoreInsight[];
   supplierBenchmark?: SupplierBenchmark;
+  dataQualityScore?: number;
+  benchmarkScore?: number | null;
+  latestScoreExplanation?: string | null;
+  recommendedActions?: string[];
   riskTrend?: string | null;
   scoreCalculatedAt?: string | null;
   scoreVersion?: string | null;
   scoreResult?: SupplierScoreResult;
-  invitationStatus: "SENT" | "ACCEPTED" | "NOT_SENT";
+  evidenceStatus?: "complete" | "missing" | "expired" | "under_review";
+  evidenceSummary?: SupplierEvidenceSummary | null;
+  invitationStatus: SupplierInvitationStatus;
+  questionnaireStatus?: SupplierQuestionnaireStatus;
+  questionnaireSentAt?: string | null;
+  questionnaireOpenedAt?: string | null;
+  questionnaireSubmittedAt?: string | null;
+  questionnaireDueDate?: string | null;
+  questionnaireReminderCount?: number;
+  lastReminderSentAt?: string | null;
+  certifications?: string[];
   notes?: string | null;
+  createdBy?: string | null;
+  updatedBy?: string | null;
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface SupplierEvidence {
+  id: string;
+  supplierId: string;
+  companyId: string;
+  evidenceType: SupplierEvidenceType;
+  title: string;
+  status: SupplierEvidenceStatus;
+  fileUrl?: string | null;
+  fileName?: string | null;
+  fileSize?: number | null;
+  mimeType?: string | null;
+  storageKey?: string | null;
+  signedUrl?: string | null;
+  uploadedAt?: string | null;
+  uploadedBy?: string | null;
+  uploadedVia?: "app" | "questionnaire" | null;
+  virusScanStatus?: "not_scanned" | "pending" | "clean" | "failed";
+  expiryReminder30SentAt?: string | null;
+  expiryReminder7SentAt?: string | null;
+  lastReminderSentAt?: string | null;
+  verifiedAt?: string | null;
+  verifiedBy?: string | null;
+  expiresAt?: string | null;
+  notes?: string | null;
+  createdBy?: string | null;
+  updatedBy?: string | null;
+  isExpired?: boolean;
+  isExpiringSoon?: boolean;
+  daysUntilExpiry?: number | null;
+  reminderSent?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface SupplierEvidenceSummary {
+  indicator: "complete" | "missing" | "expired" | "under_review";
+  total: number;
+  counts: Record<SupplierEvidenceStatus, number>;
+  verifiedTypes: SupplierEvidenceType[];
+  missingTypes: SupplierEvidenceType[];
+  hasVerifiedISO14001: boolean;
+  hasVerifiedSBTi: boolean;
+  hasVerifiedGHGInventory: boolean;
+  hasExpiredEvidence: boolean;
+  hasUnderReviewEvidence: boolean;
+  items?: SupplierEvidence[];
+}
+
+export interface SupplierQuestionnaire {
+  supplierId: string;
+  supplierName: string;
+  contactEmail: string;
+  questionnaireStatus: SupplierQuestionnaireStatus;
+  questionnaireSentAt: string | null;
+  questionnaireOpenedAt: string | null;
+  questionnaireSubmittedAt: string | null;
+  questionnaireDueDate: string | null;
+  questionnaireReminderCount: number;
+  lastReminderSentAt: string | null;
+  invitationStatus: SupplierInvitationStatus;
+  emailStatus?: {
+    configured: boolean;
+    sent: boolean;
+    message: string | null;
+    questionnaireUrl?: string;
+  } | null;
 }
 
 export interface Shipment {
@@ -137,14 +301,21 @@ export interface Shipment {
   origin: string;
   destination: string;
   distanceKm: number;
+  distanceUnit?: "km";
   transportMode: TransportMode;
   carrier: string;
   vehicleType?: string | null;
   fuelType?: string | null;
   weightKg: number;
+  weightUnit?: "kg" | "tonnes";
   costUsd: number;
+  currency?: string;
   carbonPricePerTon: number;
+  emissionFactor?: number;
+  factorSource?: string | null;
+  emissionsKgCo2e?: number;
   emissionsTonnes: number;
+  calculationStatus?: "calculated" | "missing_factor";
   carbonCostUsd: number;
   status: ShipmentStatus;
   shipmentDate: string;
@@ -549,13 +720,23 @@ export interface ShipmentImportResult {
   };
 }
 
+export type DashboardInclusionPolicy = "approved_only" | "all_records" | "draft_included";
+
+export interface DashboardDataQualityIssue {
+  type: string;
+  count: number;
+  message: string;
+  severity: "info" | "warning" | "critical";
+}
+
 export interface DashboardSummary {
   totalEmissions: number;
   scope1: number;
   scope2: number;
   scope3: number;
-  carbonIntensity: number;
+  carbonIntensity: number | null;
   carbonIntensityUnit?: string;
+  carbonIntensityBasis?: string | null;
   totalCost: number;
   totalLogisticsCost?: number;
   totalOffsets: number;
@@ -566,8 +747,10 @@ export interface DashboardSummary {
   totalSpend: number;
   totalCarbonTax: number;
   dataCompletenessPct?: number;
+  dataQualityScore?: number;
   activitiesRecorded?: number;
   totalRecords?: number;
+  calculatedRecords?: number;
   draftRecords?: number;
   submittedRecords?: number;
   reviewedRecords?: number;
@@ -575,10 +758,30 @@ export interface DashboardSummary {
   rejectedRecords?: number;
   needsCorrectionRecords?: number;
   unapprovedRecords?: number;
+  missingFactorRecords?: number;
+  sampleFactorRecords?: number;
+  zeroAmountRecords?: number;
+  calculationErrorRecords?: number;
+  includedRecordsCount?: number;
+  excludedRecordsCount?: number;
+  inclusionPolicy?: DashboardInclusionPolicy;
   missingFactorCount?: number;
   sampleFactorUsageCount?: number;
   reportsGenerated?: number;
   reportStatus?: string;
+  supplierIntelligence?: SupplierIntelligenceSummary;
+}
+
+export interface SupplierIntelligenceSummary {
+  bestPerformingSupplier: string | null;
+  worstPerformingSupplier: string | null;
+  categoriesWithHighestSupplierRisk: Array<{
+    category: string;
+    supplierCount: number;
+    aboveBenchmarkCount: number;
+  }>;
+  suppliersAboveBenchmark: number;
+  suppliersMissingBenchmarkData: number;
 }
 
 export interface DashboardMonthlyMetric {
@@ -626,6 +829,14 @@ export interface DashboardDataQuality {
   completedSignals: number;
   sampleFactorRecords: number;
   missingFactorRecords: number;
+  zeroAmountRecords?: number;
+  calculationErrorRecords?: number;
+  calculatedRecords?: number;
+  includedRecordsCount?: number;
+  excludedRecordsCount?: number;
+  inclusionPolicy?: DashboardInclusionPolicy;
+  score?: number;
+  issues?: DashboardDataQualityIssue[];
   draftRecords?: number;
   submittedRecords?: number;
   reviewedRecords?: number;
@@ -652,4 +863,21 @@ export interface DashboardData {
   facilities: DashboardFacilityMetric[];
   dataQuality: DashboardDataQuality;
   reportStatus: DashboardReportStatus;
+  totalRecords?: number;
+  calculatedRecords?: number;
+  draftRecords?: number;
+  submittedRecords?: number;
+  approvedRecords?: number;
+  missingFactorRecords?: number;
+  sampleFactorRecords?: number;
+  zeroAmountRecords?: number;
+  calculationErrorRecords?: number;
+  includedRecordsCount?: number;
+  excludedRecordsCount?: number;
+  inclusionPolicy?: DashboardInclusionPolicy;
+  scopeTotals?: DashboardScopeBreakdownMetric[];
+  categoryTotals?: DashboardCategoryMetric[];
+  monthlyTrend?: DashboardMonthlyMetric[];
+  dataQualityScore?: number;
+  dataQualityIssues?: DashboardDataQualityIssue[];
 }

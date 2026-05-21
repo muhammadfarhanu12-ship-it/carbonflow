@@ -21,6 +21,7 @@ const ReportsPage = lazy(async () => ({ default: (await import("./pages/ReportsP
 const LedgerPage = lazy(async () => ({ default: (await import("./pages/LedgerPage")).LedgerPage }));
 const AuditLogsPage = lazy(async () => ({ default: (await import("./pages/AuditLogsPage")).AuditLogsPage }));
 const SettingsPage = lazy(async () => ({ default: (await import("./pages/SettingsPage")).SettingsPage }));
+const SupplierQuestionnairePage = lazy(async () => ({ default: (await import("./pages/SupplierQuestionnairePage")).SupplierQuestionnairePage }));
 
 const SigninPage = lazy(async () => ({ default: (await import("./pages/auth/SigninPage")).SigninPage }));
 const SignupPage = lazy(async () => ({ default: (await import("./pages/auth/SignupPage")).SignupPage }));
@@ -64,6 +65,7 @@ export default function App() {
                 <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
                 <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
                 <Route path="/auth/logout" element={<Logout />} />
+                <Route path="/supplier-questionnaire/:token" element={<SupplierQuestionnairePage />} />
 
                 <Route path="/app" element={<AppLayout />}>
                   <Route index element={<DashboardPage />} />

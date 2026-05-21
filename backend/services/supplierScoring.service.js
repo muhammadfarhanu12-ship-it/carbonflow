@@ -57,6 +57,11 @@ function buildCacheKey(normalizedSupplier) {
     lastReportedAt: normalizedSupplier.lastReportedAt?.toISOString() || null,
     industry: normalizedSupplier.industry,
     category: normalizedSupplier.category,
+    region: normalizedSupplier.region,
+    country: normalizedSupplier.country,
+    complianceScore: normalizedSupplier.complianceScore,
+    verificationStatus: normalizedSupplier.verificationStatus,
+    invitationStatus: normalizedSupplier.invitationStatus,
   });
 }
 
@@ -82,11 +87,15 @@ function interpolatePercentile(ratio) {
 }
 
 function classifyRiskLevel(totalScore) {
+  if (totalScore < SUPPLIER_SCORING_CONFIG.riskThresholds.critical) {
+    return "CRITICAL";
+  }
+
   if (totalScore < SUPPLIER_SCORING_CONFIG.riskThresholds.high) {
     return "HIGH";
   }
 
-  if (totalScore <= SUPPLIER_SCORING_CONFIG.riskThresholds.medium) {
+  if (totalScore < SUPPLIER_SCORING_CONFIG.riskThresholds.medium) {
     return "MEDIUM";
   }
 
@@ -132,6 +141,13 @@ function normalizeSupplierInput(supplier = {}) {
     updatedAt: toDate(supplier.updatedAt) || new Date(),
     industry: String(supplier.industry || "").trim(),
     category: String(supplier.category || "").trim(),
+    region: String(supplier.region || "GLOBAL").trim(),
+    country: String(supplier.country || "").trim(),
+    complianceScore: clamp(toFiniteNumber(supplier.complianceScore) ?? 0, 0, 100),
+    verificationStatus: String(supplier.verificationStatus || "pending").trim().toLowerCase(),
+    invitationStatus: String(supplier.invitationStatus || "not_sent").trim().toLowerCase(),
+    questionnaireStatus: String(supplier.questionnaireStatus || supplier.invitationStatus || "not_sent").trim().toLowerCase(),
+    evidenceSummary: supplier.evidenceSummary || null,
   };
 }
 
@@ -203,6 +219,7 @@ function resolveEmissionIntensity(normalizedSupplier, insights) {
 function calculateEmissionComponent(emissionIntensity, baseline, insights) {
   if (emissionIntensity === null) {
     return {
+      rawScore: 0,
       weightedScore: 0,
       percentileRank: null,
       industryComparison: "UNKNOWN",
@@ -238,6 +255,7 @@ function calculateEmissionComponent(emissionIntensity, baseline, insights) {
   }
 
   return {
+    rawScore: round(rawScore, 2),
     weightedScore: round(weightedScore, 2),
     percentileRank,
     industryComparison,
@@ -248,24 +266,35 @@ function calculateEmissionComponent(emissionIntensity, baseline, insights) {
 
 function calculateCertificationComponent(normalizedSupplier, insights) {
   let score = 0;
+  const evidence = normalizedSupplier.evidenceSummary;
+  const hasVerifiedISO14001 = normalizedSupplier.hasISO14001 || Boolean(evidence?.hasVerifiedISO14001);
+  const hasVerifiedSBTi = normalizedSupplier.hasSBTi || Boolean(evidence?.hasVerifiedSBTi);
 
-  if (normalizedSupplier.hasISO14001) {
+  if (hasVerifiedISO14001) {
     score += SUPPLIER_SCORING_CONFIG.certificationPoints.iso14001;
   } else {
     insights.push(buildInsight("warning", "Missing ISO 14001 certification."));
   }
 
-  if (normalizedSupplier.hasSBTi) {
+  if (hasVerifiedSBTi) {
     score += SUPPLIER_SCORING_CONFIG.certificationPoints.sbti;
   } else {
     insights.push(buildInsight("warning", "Missing SBTi commitment."));
   }
 
-  if (score === 30) {
-    insights.push(buildInsight("info", "Supplier has both ISO 14001 and an SBTi commitment."));
+  if (evidence?.hasExpiredEvidence) {
+    score -= 20;
+    insights.push(buildInsight("warning", "One or more supplier evidence documents are expired."));
   }
 
-  return round(score, 2);
+  if (score >= 100) {
+    insights.push(buildInsight("info", "Supplier has verified ISO 14001 and an SBTi commitment."));
+  }
+
+  return {
+    rawScore: round(clamp(score, 0, 100), 2),
+    weightedScore: round(clamp(score, 0, 100) * SUPPLIER_SCORING_CONFIG.weights.certifications, 2),
+  };
 }
 
 function calculateTransparencyComponent(normalizedSupplier, insights) {
@@ -277,13 +306,16 @@ function calculateTransparencyComponent(normalizedSupplier, insights) {
     insights.push(buildInsight("info", "High data transparency strengthens the reliability of the supplier disclosure."));
   }
 
-  return round(weightedScore, 2);
+  return {
+    rawScore: round(normalizedSupplier.dataTransparencyScore, 2),
+    weightedScore: round(weightedScore, 2),
+  };
 }
 
-function addFreshnessInsights(normalizedSupplier, insights) {
+function calculateFreshnessComponent(normalizedSupplier, insights) {
   if (!normalizedSupplier.lastReportedAt) {
     insights.push(buildInsight("warning", "No supplier reporting date is available, which weakens ESG data freshness."));
-    return;
+    return { rawScore: 0, weightedScore: 0, daysSinceReport: null };
   }
 
   const daysSinceReport = Math.max(
@@ -293,12 +325,125 @@ function addFreshnessInsights(normalizedSupplier, insights) {
 
   if (daysSinceReport > SUPPLIER_SCORING_CONFIG.freshnessWindowsDays.stale) {
     insights.push(buildInsight("warning", `Supplier data is stale: last reported ${Math.floor(daysSinceReport)} days ago.`));
-    return;
+    return { rawScore: 35, weightedScore: 35 * SUPPLIER_SCORING_CONFIG.weights.reportingFreshness, daysSinceReport: Math.floor(daysSinceReport) };
   }
 
   if (daysSinceReport <= SUPPLIER_SCORING_CONFIG.freshnessWindowsDays.recent) {
     insights.push(buildInsight("info", `Supplier data was reported within the last ${Math.floor(daysSinceReport)} days.`));
+    return { rawScore: 100, weightedScore: 100 * SUPPLIER_SCORING_CONFIG.weights.reportingFreshness, daysSinceReport: Math.floor(daysSinceReport) };
   }
+
+  return { rawScore: 70, weightedScore: 70 * SUPPLIER_SCORING_CONFIG.weights.reportingFreshness, daysSinceReport: Math.floor(daysSinceReport) };
+}
+
+function calculateComplianceComponent(normalizedSupplier, insights) {
+  let verificationScore = 40;
+  const evidence = normalizedSupplier.evidenceSummary;
+
+  if (["third_party_verified", "verified"].includes(normalizedSupplier.verificationStatus)) verificationScore = 100;
+  if (normalizedSupplier.verificationStatus === "self_reported") verificationScore = 70;
+  if (["pending", "action_required"].includes(normalizedSupplier.verificationStatus)) verificationScore = 45;
+  if (["expired", "rejected"].includes(normalizedSupplier.verificationStatus)) verificationScore = 0;
+  if (evidence?.hasVerifiedGHGInventory) verificationScore = Math.max(verificationScore, 95);
+  if (evidence?.hasUnderReviewEvidence) verificationScore = Math.max(verificationScore, 65);
+  if (evidence?.hasExpiredEvidence) verificationScore = Math.min(verificationScore, 45);
+
+  if (verificationScore < 50) {
+    insights.push(buildInsight("warning", `Verification status is ${normalizedSupplier.verificationStatus.replace(/_/g, " ")}.`));
+  }
+
+  const rawScore = round((normalizedSupplier.complianceScore * 0.55) + (verificationScore * 0.45), 2);
+  return {
+    rawScore,
+    weightedScore: round(rawScore * SUPPLIER_SCORING_CONFIG.weights.complianceVerification, 2),
+    verificationScore,
+  };
+}
+
+function calculateRegionRiskComponent(normalizedSupplier, baseline) {
+  const key = String(normalizedSupplier.region || "GLOBAL").trim().replace(/[\s-]+/g, "_").toUpperCase();
+  const regionScore = SUPPLIER_SCORING_CONFIG.regionRiskScores[key] ?? SUPPLIER_SCORING_CONFIG.regionRiskScores.GLOBAL;
+  const industryScore = baseline.key === "energy" || baseline.key === "mining" ? 55 : baseline.key === "chemicals" ? 65 : 80;
+  const rawScore = round((regionScore * 0.55) + (industryScore * 0.45), 2);
+
+  return {
+    rawScore,
+    weightedScore: round(rawScore * SUPPLIER_SCORING_CONFIG.weights.categoryRegionRisk, 2),
+  };
+}
+
+function calculateDataQualityComponent(normalizedSupplier) {
+  const evidence = normalizedSupplier.evidenceSummary;
+  const checks = [
+    Boolean(normalizedSupplier.name),
+    normalizedSupplier.totalEmissions !== null && normalizedSupplier.totalEmissions > 0,
+    normalizedSupplier.revenue !== null && normalizedSupplier.revenue > 0,
+    normalizedSupplier.providedIntensity !== null || (normalizedSupplier.totalEmissions !== null && normalizedSupplier.revenue !== null),
+    normalizedSupplier.dataTransparencyScore > 0,
+    Boolean(normalizedSupplier.lastReportedAt),
+    Boolean(normalizedSupplier.category),
+    Boolean(normalizedSupplier.country || normalizedSupplier.region),
+    Boolean(evidence?.hasVerifiedGHGInventory),
+    Boolean(evidence?.hasVerifiedISO14001),
+  ];
+
+  const rawScore = (checks.filter(Boolean).length / checks.length) * 100;
+  const evidencePenalty = evidence?.hasExpiredEvidence ? 15 : 0;
+  return round(clamp(rawScore - evidencePenalty, 0, 100), 2);
+}
+
+function buildRecommendedActions(normalizedSupplier, components, benchmark) {
+  const actions = [];
+  const add = (action) => {
+    if (!actions.includes(action)) actions.push(action);
+  };
+
+  if (normalizedSupplier.totalEmissions === null || normalizedSupplier.totalEmissions <= 0) add("Request verified emissions data");
+  if (normalizedSupplier.questionnaireStatus === "not_sent" || normalizedSupplier.invitationStatus === "not_sent") add("Questionnaire has not been sent.");
+  if (normalizedSupplier.questionnaireStatus === "overdue" || normalizedSupplier.invitationStatus === "overdue") add("Questionnaire is overdue.");
+  if (normalizedSupplier.questionnaireStatus === "submitted" || normalizedSupplier.invitationStatus === "submitted") add("Supplier submitted questionnaire, review evidence.");
+  if (!normalizedSupplier.hasISO14001) add("Request ISO 14001 certificate");
+  if (!normalizedSupplier.hasSBTi) add("Request GHG inventory");
+  if (!normalizedSupplier.evidenceSummary?.hasVerifiedGHGInventory) add("Request verified GHG inventory evidence");
+  if (normalizedSupplier.evidenceSummary?.hasExpiredEvidence) add("Update expired supplier evidence");
+  if (normalizedSupplier.evidenceSummary?.hasUnderReviewEvidence) add("Review submitted supplier evidence");
+  if (!normalizedSupplier.lastReportedAt) add("Update last reported date");
+  if (benchmark.isAboveIndustryAverage) add("Review high emissions intensity");
+  if (["self_reported", "pending"].includes(normalizedSupplier.verificationStatus)) add("Verify self-reported data");
+  if (["expired", "rejected"].includes(normalizedSupplier.verificationStatus)) add("Request verified emissions data");
+  if (components.dataQualityScore < 70) add("Complete missing supplier profile data");
+
+  return actions;
+}
+
+function buildExplanation(riskLevel, normalizedSupplier, components, benchmark) {
+  const reasons = [];
+
+  if (benchmark.isAboveIndustryAverage) reasons.push("emissions intensity is above benchmark");
+  if (["pending", "self_reported", "expired", "rejected"].includes(normalizedSupplier.verificationStatus)) reasons.push(`verification is ${normalizedSupplier.verificationStatus.replace(/_/g, " ")}`);
+  if (!normalizedSupplier.hasISO14001 && !normalizedSupplier.hasSBTi) reasons.push("no certifications are available");
+  if (!normalizedSupplier.lastReportedAt) reasons.push("no last reported date is available");
+  if (components.dataQualityScore < 70) reasons.push("key supplier data is missing");
+  if (normalizedSupplier.invitationStatus === "overdue") reasons.push("the supplier questionnaire is overdue");
+
+  if (reasons.length === 0) {
+    return `Supplier is ${riskLevel.toLowerCase()} risk because scoring inputs are complete, current, and broadly aligned with benchmark expectations.`;
+  }
+
+  return `Supplier is ${riskLevel.toLowerCase()} risk because ${reasons.join(", ")}.`;
+}
+
+function applyRiskPenalties(score, normalizedSupplier, components) {
+  let adjusted = score;
+
+  if (["expired", "rejected"].includes(normalizedSupplier.verificationStatus)) adjusted -= 18;
+  if (!normalizedSupplier.lastReportedAt) adjusted -= 8;
+  if (normalizedSupplier.totalEmissions === null || normalizedSupplier.totalEmissions <= 0) adjusted -= 10;
+  if (normalizedSupplier.dataTransparencyScore <= 0) adjusted -= 8;
+  if (components.dataQualityScore < 50) adjusted -= 10;
+  if (normalizedSupplier.invitationStatus === "overdue") adjusted -= 8;
+
+  return round(clamp(adjusted, 0, 100), 2);
 }
 
 function calculateSupplierScore(supplier = {}) {
@@ -320,32 +465,54 @@ function calculateSupplierScore(supplier = {}) {
     normalizedSupplier.category,
   );
 
-  addFreshnessInsights(normalizedSupplier, insights);
-
   const intensityResolution = resolveEmissionIntensity(normalizedSupplier, insights);
   const emissionComponent = calculateEmissionComponent(intensityResolution.emissionIntensity, baseline, insights);
   const certificationScore = calculateCertificationComponent(normalizedSupplier, insights);
   const transparencyScore = calculateTransparencyComponent(normalizedSupplier, insights);
-  const totalScore = round(clamp(
-    emissionComponent.weightedScore + certificationScore + transparencyScore,
+  const complianceScore = calculateComplianceComponent(normalizedSupplier, insights);
+  const freshnessScore = calculateFreshnessComponent(normalizedSupplier, insights);
+  const categoryRegionRiskScore = calculateRegionRiskComponent(normalizedSupplier, baseline);
+  const dataQualityScore = calculateDataQualityComponent(normalizedSupplier);
+  const prePenaltyScore = round(clamp(
+    emissionComponent.weightedScore
+      + certificationScore.weightedScore
+      + transparencyScore.weightedScore
+      + complianceScore.weightedScore
+      + freshnessScore.weightedScore
+      + categoryRegionRiskScore.weightedScore,
     0,
     100,
   ), 2);
+  const totalScore = applyRiskPenalties(prePenaltyScore, normalizedSupplier, { dataQualityScore });
+  const riskLevel = classifyRiskLevel(totalScore);
+  const recommendedActions = buildRecommendedActions(normalizedSupplier, { dataQualityScore }, emissionComponent);
+  const explanation = buildExplanation(riskLevel, normalizedSupplier, { dataQualityScore }, emissionComponent);
 
   const result = {
     supplierId: normalizedSupplier.id || null,
     supplierName: normalizedSupplier.name,
     totalScore,
-    riskLevel: classifyRiskLevel(totalScore),
+    riskLevel,
     riskTrend: null,
     emissionIntensity: intensityResolution.emissionIntensity === null
       ? null
       : round(intensityResolution.emissionIntensity, 6),
     intensitySource: intensityResolution.source,
     breakdown: {
-      emissionScore: emissionComponent.weightedScore,
-      certificationScore,
-      transparencyScore,
+      emissionScore: emissionComponent.rawScore,
+      emissionsScore: emissionComponent.rawScore,
+      emissionWeightedScore: emissionComponent.weightedScore,
+      certificationScore: certificationScore.rawScore,
+      certificationWeightedScore: certificationScore.weightedScore,
+      transparencyScore: transparencyScore.rawScore,
+      transparencyWeightedScore: transparencyScore.weightedScore,
+      complianceScore: complianceScore.rawScore,
+      complianceWeightedScore: complianceScore.weightedScore,
+      reportingFreshnessScore: round(freshnessScore.rawScore, 2),
+      reportingFreshnessWeightedScore: round(freshnessScore.weightedScore, 2),
+      categoryRegionRiskScore: categoryRegionRiskScore.rawScore,
+      categoryRegionRiskWeightedScore: categoryRegionRiskScore.weightedScore,
+      dataQualityScore,
     },
     benchmark: {
       industryKey: baseline.key,
@@ -356,6 +523,15 @@ function calculateSupplierScore(supplier = {}) {
       isAboveIndustryAverage: emissionComponent.isAboveIndustryAverage,
       variancePct: emissionComponent.variancePct,
     },
+    complianceScore: complianceScore.rawScore,
+    certificationScore: certificationScore.rawScore,
+    transparencyScore: transparencyScore.rawScore,
+    reportingFreshnessScore: round(freshnessScore.rawScore, 2),
+    dataQualityScore,
+    benchmarkScore: emissionComponent.percentileRank,
+    latestScoreExplanation: explanation,
+    explanation,
+    recommendedActions,
     insights: dedupeInsights(insights),
     calculatedAt: new Date().toISOString(),
   };
@@ -395,6 +571,10 @@ function buildPersistedScoreFields(supplier = {}) {
     supplierScoreBreakdown: scoreResult.breakdown,
     supplierScoreInsights: scoreResult.insights,
     supplierBenchmark: scoreResult.benchmark,
+    dataQualityScore: scoreResult.dataQualityScore,
+    benchmarkScore: scoreResult.benchmarkScore,
+    latestScoreExplanation: scoreResult.latestScoreExplanation,
+    recommendedActions: scoreResult.recommendedActions,
     riskTrend: scoreResult.riskTrend,
     scoreCalculatedAt: new Date(scoreResult.calculatedAt),
     scoreVersion: SUPPLIER_SCORING_CONFIG.version,
@@ -432,6 +612,7 @@ async function calculateSupplierScoresBulk(suppliers = []) {
     accumulator[item.riskLevel] += 1;
     return accumulator;
   }, {
+    CRITICAL: 0,
     HIGH: 0,
     MEDIUM: 0,
     LOW: 0,
@@ -445,7 +626,7 @@ async function calculateSupplierScoresBulk(suppliers = []) {
     suppliers: results,
     stats: {
       avgScore,
-      highRiskCount: distribution.HIGH,
+      highRiskCount: distribution.HIGH + distribution.CRITICAL,
       distribution,
     },
   };

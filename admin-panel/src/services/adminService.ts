@@ -6,6 +6,7 @@ import type {
   CarbonDataRecord,
   DashboardData,
   PaginatedResponse,
+  SupplierBenchmarkRecord,
 } from '../types/admin';
 
 const DEFAULT_PAGE_SIZE = 10;
@@ -29,4 +30,17 @@ export const adminService = {
   },
   getSettings: () => apiClient.get<AdminSettings>('/admin/settings'),
   updateSettings: (data: Partial<AdminSettings>) => apiClient.put<AdminSettings>('/admin/settings', data),
+  getSupplierBenchmarks: (params: { search?: string; category?: string; region?: string; sourceName?: string; sourceYear?: string; page?: number; pageSize?: number } = {}) => {
+    const query = new URLSearchParams();
+    query.set('page', String(params.page || 1));
+    query.set('pageSize', String(params.pageSize || DEFAULT_PAGE_SIZE));
+    if (params.search) query.set('search', params.search);
+    if (params.category) query.set('category', params.category);
+    if (params.region) query.set('region', params.region);
+    if (params.sourceName) query.set('sourceName', params.sourceName);
+    if (params.sourceYear) query.set('sourceYear', params.sourceYear);
+    return apiClient.get<PaginatedResponse<SupplierBenchmarkRecord>>(`/admin/supplier-benchmarks?${query.toString()}`);
+  },
+  uploadSupplierBenchmarkCsv: (csv: string) => apiClient.post<{ created: number; data: SupplierBenchmarkRecord[] }>('/admin/supplier-benchmarks/upload-csv', { csv }),
+  deactivateSupplierBenchmark: (id: string) => apiClient.patch<SupplierBenchmarkRecord>(`/admin/supplier-benchmarks/${id}/deactivate`, {}),
 };

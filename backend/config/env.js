@@ -151,6 +151,15 @@ const env = {
     pass: parseString(process.env.SMTP_PASS, parseString(process.env.EMAIL_PASS, "")),
     from: parseString(process.env.FROM_EMAIL, parseString(process.env.EMAIL_FROM, "")),
   },
+  storage: {
+    provider: parseString(process.env.STORAGE_PROVIDER, "local"),
+    bucket: parseString(process.env.STORAGE_BUCKET, ""),
+    region: parseString(process.env.STORAGE_REGION, ""),
+    accessKey: parseString(process.env.STORAGE_ACCESS_KEY, ""),
+    secretKey: parseString(process.env.STORAGE_SECRET_KEY, ""),
+    publicUrl: normalizeHttpUrl(parseString(process.env.STORAGE_PUBLIC_URL, "")),
+  },
+  cronSecret: parseString(process.env.CRON_SECRET, ""),
   seedOnBoot: parseBoolean(process.env.SEED_ON_BOOT, nodeEnv !== "production"),
   carbonPricePerTon: parseNumber(process.env.CARBON_PRICE_PER_TON, 55),
 };
@@ -168,14 +177,6 @@ function validateEnv() {
 
   if (!env.isTest && !process.env.FRONTEND_URL && !process.env.CLIENT_URL) {
     missing.push("FRONTEND_URL or CLIENT_URL");
-  }
-
-  if (!env.isTest && !process.env.EMAIL_USER && !process.env.SMTP_USER) {
-    missing.push("SMTP_USER");
-  }
-
-  if (!env.isTest && !process.env.EMAIL_PASS && !process.env.SMTP_PASS) {
-    missing.push("SMTP_PASS");
   }
 
   if (env.isProduction && env.allowedOrigins.length === 0) {
@@ -216,13 +217,6 @@ function validateEnv() {
     throw new Error("ADMIN_JWT_SECRET or JWT_SECRET must be changed before running in production.");
   }
 
-  if (!env.isTest && !env.mail.user) {
-    throw new Error("SMTP_USER must be configured.");
-  }
-
-  if (!env.isTest && !env.mail.pass) {
-    throw new Error("SMTP_PASS must be configured.");
-  }
 }
 
 validateEnv();

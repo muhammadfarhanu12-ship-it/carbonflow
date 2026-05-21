@@ -7,8 +7,8 @@ const controller = require("../controllers/reports.controller");
 const router = express.Router();
 
 router.use(authenticate);
-router.get("/", requirePermission("reports:view"), asyncHandler(controller.list));
-router.post("/generate", requirePermission("reports:generate"), asyncHandler(controller.generate));
-router.get("/download/:fileName", requirePermission("reports:view"), asyncHandler(controller.download));
+router.get("/", requirePermission("report:view"), asyncHandler(controller.list));
+router.post("/generate", requirePermission("report:generate"), asyncHandler(controller.generate));
+router.get("/download/:fileName", requirePermission("report:view"), asyncHandler(controller.download));
 
 module.exports = router;

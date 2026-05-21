@@ -8,6 +8,6 @@ const router = express.Router();
 
 router.use(authenticate);
 
-router.get("/", requirePermission("audit:view"), asyncHandler(controller.listAuditLogs));
+router.get("/", requirePermission("supplier:audit:view"), asyncHandler(controller.listAuditLogs));
 
 module.exports = router;

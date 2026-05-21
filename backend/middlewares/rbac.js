@@ -12,13 +12,60 @@ const ROLE_ALIASES = {
   AUDITOR: "auditor",
 };
 
+const PERMISSIONS = [
+  "supplier:view",
+  "supplier:create",
+  "supplier:update",
+  "supplier:archive",
+  "supplier:score:view",
+  "supplier:questionnaire:send",
+  "supplier:evidence:view",
+  "supplier:evidence:verify",
+  "supplier:audit:view",
+  "factor:manage",
+  "report:generate",
+  "report:view",
+  "user:manage",
+];
+
 const ROLE_PERMISSIONS = {
-  owner: ["records:create", "records:edit", "records:approve", "factors:manage", "reports:generate", "reports:view", "audit:view"],
-  admin: ["records:create", "records:edit", "records:approve", "factors:manage", "reports:generate", "reports:view", "audit:view"],
-  manager: ["records:create", "records:edit", "records:approve", "reports:generate", "reports:view"],
-  data_entry: ["records:create", "records:edit", "reports:view"],
-  viewer: ["reports:view"],
-  auditor: ["reports:view", "audit:view"],
+  owner: [...PERMISSIONS, "records:create", "records:edit", "records:approve"],
+  admin: [...PERMISSIONS, "records:create", "records:edit", "records:approve"],
+  manager: [
+    "supplier:view",
+    "supplier:create",
+    "supplier:update",
+    "supplier:archive",
+    "supplier:score:view",
+    "supplier:questionnaire:send",
+    "supplier:evidence:view",
+    "report:generate",
+    "report:view",
+    "records:create",
+    "records:edit",
+    "records:approve",
+  ],
+  data_entry: ["supplier:view", "supplier:create", "supplier:update", "supplier:evidence:view", "report:view", "records:create", "records:edit"],
+  viewer: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "report:view"],
+  auditor: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "supplier:audit:view", "report:view"],
+};
+
+const LEGACY_PERMISSION_ALIASES = {
+  "suppliers:view": "supplier:view",
+  "suppliers:manage": "supplier:update",
+  "suppliers:engage": "supplier:questionnaire:send",
+  "audit:view": "supplier:audit:view",
+  "factors:manage": "factor:manage",
+  "reports:generate": "report:generate",
+  "reports:view": "report:view",
+};
+
+const CUSTOM_POLICY_DEFAULTS = {
+  customRoles: {},
+  departmentAccess: [],
+  regionAccess: [],
+  fieldRestrictions: {},
+  supplierCategoryRestrictions: [],
 };
 
 function normalizeRole(role) {
@@ -26,9 +73,20 @@ function normalizeRole(role) {
   return ROLE_ALIASES[key] || key.toLowerCase();
 }
 
-function hasPermission(user, permission) {
+function normalizePermission(permission) {
+  const normalized = String(permission || "").trim();
+  return LEGACY_PERMISSION_ALIASES[normalized] || normalized;
+}
+
+function resolveUserPermissions(user) {
   const role = normalizeRole(user?.role);
-  return Boolean(ROLE_PERMISSIONS[role]?.includes(permission));
+  const rolePermissions = ROLE_PERMISSIONS[role] || [];
+  const customPermissions = Array.isArray(user?.permissions) ? user.permissions : [];
+  return [...new Set([...rolePermissions, ...customPermissions].map(normalizePermission))];
+}
+
+function hasPermission(user, permission) {
+  return resolveUserPermissions(user).includes(normalizePermission(permission));
 }
 
 function requirePermission(permission) {
@@ -42,8 +100,13 @@ function requirePermission(permission) {
 }
 
 module.exports = {
+  CUSTOM_POLICY_DEFAULTS,
+  LEGACY_PERMISSION_ALIASES,
+  PERMISSIONS,
   ROLE_PERMISSIONS,
   hasPermission,
   normalizeRole,
+  normalizePermission,
   requirePermission,
+  resolveUserPermissions,
 };

@@ -19,6 +19,8 @@ const supplierScoreSchema = Joi.object({
   category: Joi.string().trim().allow("").allow(null).max(120).default(""),
   country: Joi.string().trim().allow("").allow(null).max(80).default(""),
   region: Joi.string().trim().allow("").allow(null).max(120).default(""),
+  verificationStatus: Joi.string().trim().allow("").allow(null).default("pending"),
+  invitationStatus: Joi.string().trim().allow("").allow(null).default("not_sent"),
 }).unknown(true);
 
 const supplierBulkScoreSchema = Joi.alternatives().try(

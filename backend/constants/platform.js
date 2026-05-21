@@ -4,7 +4,52 @@ const USER_STATUSES = ["ACTIVE", "INVITED", "SUSPENDED"];
 const TRANSPORT_MODES = ["ROAD", "RAIL", "AIR", "OCEAN"];
 const SHIPMENT_STATUSES = ["PLANNED", "IN_TRANSIT", "DELAYED", "DELIVERED"];
 const SUPPLIER_RISK_LEVELS = ["LOW", "MEDIUM", "HIGH"];
-const SUPPLIER_VERIFICATION_STATUSES = ["VERIFIED", "PENDING", "ACTION_REQUIRED"];
+const SUPPLIER_STATUSES = [
+  "draft",
+  "invited",
+  "submitted",
+  "under_review",
+  "verified",
+  "rejected",
+  "needs_update",
+  "approved",
+  "high_risk",
+  "archived",
+];
+const SUPPLIER_VERIFICATION_STATUSES = [
+  "pending",
+  "self_reported",
+  "third_party_verified",
+  "expired",
+  "rejected",
+  "VERIFIED",
+  "PENDING",
+  "ACTION_REQUIRED",
+];
+const SUPPLIER_INVITATION_STATUSES = [
+  "not_sent",
+  "sent",
+  "opened",
+  "submitted",
+  "overdue",
+  "expired",
+  "SENT",
+  "ACCEPTED",
+  "NOT_SENT",
+];
+const SUPPLIER_QUESTIONNAIRE_STATUSES = ["not_sent", "sent", "opened", "submitted", "overdue", "expired"];
+const SUPPLIER_EVIDENCE_TYPES = [
+  "iso_14001_certificate",
+  "sbti_commitment",
+  "ghg_inventory",
+  "esg_report",
+  "audit_report",
+  "utility_fuel_data",
+  "carbon_reduction_plan",
+  "supplier_questionnaire_answers",
+  "other",
+];
+const SUPPLIER_EVIDENCE_STATUSES = ["requested", "submitted", "under_review", "verified", "rejected", "expired"];
 
 const EMISSION_SCOPES = [1, 2, 3];
 const EMISSION_SOURCE_TYPES = [
@@ -39,7 +84,12 @@ module.exports = {
   TRANSPORT_MODES,
   SHIPMENT_STATUSES,
   SUPPLIER_RISK_LEVELS,
+  SUPPLIER_STATUSES,
   SUPPLIER_VERIFICATION_STATUSES,
+  SUPPLIER_INVITATION_STATUSES,
+  SUPPLIER_QUESTIONNAIRE_STATUSES,
+  SUPPLIER_EVIDENCE_TYPES,
+  SUPPLIER_EVIDENCE_STATUSES,
   EMISSION_SCOPES,
   EMISSION_SOURCE_TYPES,
   OFFSET_PROJECT_STATUSES,

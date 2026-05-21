@@ -406,6 +406,16 @@ export const apiClient = {
   patch: async <T = unknown>(path: string, data?: unknown) => unwrapResponse<T>((await axiosClient.patch<T | ApiEnvelope<T>>(path, data ?? {})).data),
   delete: async <T = unknown>(path: string) => unwrapResponse<T>((await axiosClient.delete<T | ApiEnvelope<T>>(path)).data),
   postForm: async <T = unknown>(path: string, data: FormData) => unwrapResponse<T>((await axiosClient.post<T | ApiEnvelope<T>>(path, data)).data),
+  postFormWithProgress: async <T = unknown>(
+    path: string,
+    data: FormData,
+    onUploadProgress?: (progress: number) => void,
+  ) => unwrapResponse<T>((await axiosClient.post<T | ApiEnvelope<T>>(path, data, {
+    onUploadProgress: (event) => {
+      if (!onUploadProgress || !event.total) return;
+      onUploadProgress(Math.round((event.loaded / event.total) * 100));
+    },
+  })).data),
 };
 
 export { API_BASE_URL, axiosClient, buildAbsoluteApiUrl };

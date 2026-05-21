@@ -2,6 +2,7 @@ const jwt = require("jsonwebtoken");
 const { Admin } = require("../../../models");
 const env = require("../../../config/env");
 const ApiError = require("../../../utils/ApiError");
+const { hasPermission } = require("../../../middlewares/rbac");
 
 function extractBearerToken(req) {
   const authHeader = req.headers.authorization || "";
@@ -80,9 +81,26 @@ function requireAdminRole(...roles) {
   };
 }
 
+function requireAdminPermission(permission) {
+  return (req, _res, next) => {
+    const adminUser = {
+      role: req.admin?.role === "superadmin" ? "owner" : req.admin?.role,
+      permissions: req.admin?.permissions,
+    };
+
+    if (!hasPermission(adminUser, permission)) {
+      next(new ApiError(403, `Permission denied: ${permission}`));
+      return;
+    }
+
+    next();
+  };
+}
+
 module.exports = {
   verifyAdminToken,
   optionalAdminToken,
   requireAdminRole,
+  requireAdminPermission,
   resolveAdminFromToken,
 };

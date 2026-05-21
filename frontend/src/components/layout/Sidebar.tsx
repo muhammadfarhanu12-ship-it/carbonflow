@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/utils/cn";
 import { useAuth } from "@/src/hooks/useAuth";
+import { hasPermission } from "@/src/utils/permissions";
 
 const navigation = [
   { name: "Dashboard", href: "/app", icon: LayoutDashboard },
@@ -28,7 +29,7 @@ const navigation = [
 export function Sidebar() {
   const location = useLocation();
   const { user } = useAuth();
-  const canViewAuditLogs = ["OWNER", "ADMIN", "SUPERADMIN", "AUDITOR", "ANALYST"].includes(String(user?.role || "").toUpperCase());
+  const canViewAuditLogs = hasPermission(user, "supplier:audit:view");
 
   return (
     <div className="flex h-full w-64 flex-col border-r bg-card">

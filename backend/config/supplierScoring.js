@@ -1,17 +1,30 @@
 const SUPPLIER_SCORING_CONFIG = Object.freeze({
-  version: "2026-04-20",
+  version: "2026-05-20-phase2",
   weights: {
-    emissionIntensity: 0.5,
-    certifications: 0.3,
+    emissionIntensity: 0.3,
     dataTransparency: 0.2,
+    complianceVerification: 0.2,
+    certifications: 0.1,
+    reportingFreshness: 0.1,
+    categoryRegionRisk: 0.1,
   },
   certificationPoints: {
-    iso14001: 15,
-    sbti: 15,
+    iso14001: 50,
+    sbti: 50,
   },
   riskThresholds: {
-    high: 40,
-    medium: 70,
+    critical: 40,
+    high: 60,
+    medium: 80,
+  },
+  regionRiskScores: {
+    GLOBAL: 70,
+    NORTH_AMERICA: 90,
+    EUROPE: 90,
+    APAC: 72,
+    MIDDLE_EAST: 68,
+    AFRICA: 62,
+    SOUTH_AMERICA: 70,
   },
   emissionNormalization: {
     minMultiplier: 0.35,

@@ -61,6 +61,12 @@ const checkoutRateLimiter = buildLimiter({
   message: "Too many checkout attempts, please wait before trying again",
 });
 
+const publicQuestionnaireRateLimiter = buildLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  message: "Too many questionnaire attempts, please wait before trying again",
+});
+
 module.exports = {
   apiRateLimiter,
   authRateLimiter,
@@ -70,4 +76,5 @@ module.exports = {
   aiOptimizationRateLimiter,
   importRateLimiter,
   checkoutRateLimiter,
+  publicQuestionnaireRateLimiter,
 };

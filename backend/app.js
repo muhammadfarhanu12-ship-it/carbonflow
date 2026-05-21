@@ -28,6 +28,8 @@ const importRoutes = require("./routes/import.routes");
 const shipmentRoutes = require("./routes/shipment.routes");
 const shipmentEmissionsRoutes = require("./routes/shipmentEmissions.routes");
 const supplierRoutes = require("./routes/supplier.routes");
+const publicQuestionnaireRoutes = require("./routes/publicQuestionnaire.routes");
+const internalJobsRoutes = require("./routes/internalJobs.routes");
 const uploadRoutes = require("./routes/upload.routes");
 const optimizationRoutes = require("./routes/optimization.routes");
 const aiRoutes = require("./routes/ai.routes.ts");
@@ -174,6 +176,8 @@ function createApp() {
   app.use("/api/shipments", importRoutes);
   app.use("/api/shipments", shipmentRoutes);
   app.use("/api/suppliers", supplierRoutes);
+  app.use("/api/public", publicQuestionnaireRoutes);
+  app.use("/api/internal", internalJobsRoutes);
   app.use("/api/upload", uploadRoutes);
   app.use("/api/optimization", optimizationRoutes);
   app.use("/api/ai", aiRoutes);

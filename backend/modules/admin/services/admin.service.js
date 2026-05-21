@@ -11,6 +11,7 @@ const {
 } = require("../../../models");
 const ApiError = require("../../../utils/ApiError");
 const EmissionFactorService = require("../../../services/emissionFactor.service");
+const SupplierBenchmarkDatasetService = require("../../../services/supplierBenchmarkDataset.service");
 const { getPagination, formatPaginatedResponse } = require("../../../utils/pagination");
 const { buildSearchFilter } = require("../../../models/helpers/model.utils");
 
@@ -428,6 +429,22 @@ class AdminService {
 
   static deactivateEmissionFactor(id, admin) {
     return EmissionFactorService.deactivate(id, admin);
+  }
+
+  static listSupplierBenchmarks(query = {}) {
+    return SupplierBenchmarkDatasetService.list(query);
+  }
+
+  static createSupplierBenchmark(payload, admin) {
+    return SupplierBenchmarkDatasetService.create(payload, admin);
+  }
+
+  static uploadSupplierBenchmarkCsv(payload, admin) {
+    return SupplierBenchmarkDatasetService.uploadCsv(payload.csv || payload.content || "", admin);
+  }
+
+  static deactivateSupplierBenchmark(id, admin) {
+    return SupplierBenchmarkDatasetService.deactivate(id, admin);
   }
 
   static async listReports(query = {}) {

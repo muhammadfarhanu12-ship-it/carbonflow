@@ -1,11 +1,34 @@
 const { Shipment, Supplier } = require("../models");
 const BaseService = require("./base.service");
-const { calculateShipmentEmissions, round } = require("./carbonEngine");
+const { calculateShipmentEmissions, round, toKgFromTonnes } = require("./carbonEngine");
 const EmissionRecordService = require("./emissionRecord.service");
 const AuditService = require("./audit.service");
 
+const DEFAULT_MANUAL_SUPPLIER_NAME = "Manual Shipment Supplier";
+const SHIPMENT_FACTOR_SOURCE = "CarbonFlow sample logistics factors";
+
 function calculateCarbonCost(emissionsTonnes, carbonPricePerTon) {
   return round(Number(emissionsTonnes || 0) * Number(carbonPricePerTon || 0), 2);
+}
+
+function normalizeShipmentPayload(payload = {}) {
+  const weightUnit = String(payload.weightUnit || "kg").toLowerCase();
+  const hasWeight = payload.weightKg !== undefined && payload.weightKg !== null && payload.weightKg !== "";
+  const weightKg = weightUnit === "tonnes"
+    ? Number(payload.weightKg || 0) * 1000
+    : Number(payload.weightKg || 0);
+  const normalized = {
+    ...payload,
+    distanceUnit: "km",
+    weightUnit: "kg",
+    currency: "USD",
+  };
+
+  if (payload.distanceKm !== undefined) normalized.distanceKm = Number(payload.distanceKm || 0);
+  if (hasWeight) normalized.weightKg = weightKg;
+  if (payload.costUsd !== undefined) normalized.costUsd = Number(payload.costUsd || 0);
+
+  return normalized;
 }
 
 class ShipmentService extends BaseService {
@@ -44,6 +67,35 @@ class ShipmentService extends BaseService {
   }
 
   static async getSupplier(companyId, supplierId) {
+    if (!supplierId) {
+      const existingSupplier = await Supplier.findOne({
+        companyId,
+        name: { $regex: /^Manual Shipment Supplier$/i },
+      });
+
+      if (existingSupplier) {
+        return existingSupplier;
+      }
+
+      return Supplier.create({
+        companyId,
+        name: DEFAULT_MANUAL_SUPPLIER_NAME,
+        contactEmail: "ops+manual-shipments@carbonflow.local",
+        country: "Unknown",
+        region: "Global",
+        category: "Logistics",
+        verificationStatus: "PENDING",
+        invitationStatus: "NOT_SENT",
+        onTimeDeliveryRate: 95,
+        renewableRatio: 0,
+        complianceFlags: 0,
+        totalEmissions: 0,
+        carbonScore: 75,
+        riskScore: 25,
+        riskLevel: "LOW",
+      });
+    }
+
     const supplier = await Supplier.findOne({ _id: supplierId, companyId });
 
     if (!supplier) {
@@ -59,30 +111,44 @@ class ShipmentService extends BaseService {
     const shipmentEmissions = calculateShipmentEmissions(payload, emissionFactorOverrides);
     const emissionsTonnes = shipmentEmissions.emissionsTonnes;
     const carbonCostUsd = calculateCarbonCost(emissionsTonnes, payload.carbonPricePerTon);
+    const emissionFactor = shipmentEmissions.factorKgPerTonKm;
 
     return {
       ...shipmentEmissions,
       emissionsTonnes,
+      emissionsKgCo2e: toKgFromTonnes(emissionsTonnes),
+      emissionFactor,
+      factorSource: emissionFactor > 0 ? SHIPMENT_FACTOR_SOURCE : "Emission factor missing",
+      calculationStatus: emissionFactor > 0 ? "calculated" : "missing_factor",
       carbonCostUsd,
     };
   }
 
   static async create(payload, companyId, carbonPricePerTon, actor = null, emissionFactorOverrides = {}) {
-    const supplier = await this.getSupplier(companyId, payload.supplierId);
+    const normalizedPayload = normalizeShipmentPayload(payload);
+    const supplier = await this.getSupplier(companyId, normalizedPayload.supplierId);
     const merged = {
-      ...payload,
+      ...normalizedPayload,
       companyId,
-      carbonPricePerTon: payload.carbonPricePerTon || carbonPricePerTon,
-      shipmentDate: payload.shipmentDate || payload.date || new Date(),
+      carbonPricePerTon: normalizedPayload.carbonPricePerTon || carbonPricePerTon,
+      shipmentDate: normalizedPayload.shipmentDate || normalizedPayload.date || new Date(),
     };
     const calculatedFields = this.calculateFields(merged, emissionFactorOverrides);
 
     const shipment = await Shipment.create({
-      ...payload,
+      ...normalizedPayload,
       companyId,
+      supplierId: supplier.id,
+      distanceUnit: "km",
+      weightUnit: "kg",
+      currency: "USD",
       carbonPricePerTon: merged.carbonPricePerTon,
       shipmentDate: merged.shipmentDate,
+      emissionFactor: calculatedFields.emissionFactor,
+      factorSource: calculatedFields.factorSource,
+      emissionsKgCo2e: calculatedFields.emissionsKgCo2e,
       emissionsTonnes: calculatedFields.emissionsTonnes,
+      calculationStatus: calculatedFields.calculationStatus,
       carbonCostUsd: calculatedFields.carbonCostUsd,
     });
 
@@ -113,20 +179,29 @@ class ShipmentService extends BaseService {
       throw error;
     }
 
-    const supplier = await this.getSupplier(companyId, payload.supplierId || shipment.supplierId);
+    const normalizedPayload = normalizeShipmentPayload(payload);
+    const supplier = await this.getSupplier(companyId, normalizedPayload.supplierId || shipment.supplierId);
     const merged = {
       ...shipment.toJSON(),
-      ...payload,
-      carbonPricePerTon: payload.carbonPricePerTon || shipment.carbonPricePerTon || carbonPricePerTon,
-      shipmentDate: payload.shipmentDate || payload.date || shipment.shipmentDate || shipment.createdAt,
+      ...normalizedPayload,
+      carbonPricePerTon: normalizedPayload.carbonPricePerTon || shipment.carbonPricePerTon || carbonPricePerTon,
+      shipmentDate: normalizedPayload.shipmentDate || normalizedPayload.date || shipment.shipmentDate || shipment.createdAt,
     };
     const calculatedFields = this.calculateFields(merged, emissionFactorOverrides);
 
     await shipment.update({
-      ...payload,
+      ...normalizedPayload,
+      supplierId: supplier.id,
+      distanceUnit: "km",
+      weightUnit: "kg",
+      currency: "USD",
       carbonPricePerTon: merged.carbonPricePerTon,
       shipmentDate: merged.shipmentDate,
+      emissionFactor: calculatedFields.emissionFactor,
+      factorSource: calculatedFields.factorSource,
+      emissionsKgCo2e: calculatedFields.emissionsKgCo2e,
       emissionsTonnes: calculatedFields.emissionsTonnes,
+      calculationStatus: calculatedFields.calculationStatus,
       carbonCostUsd: calculatedFields.carbonCostUsd,
     });
 

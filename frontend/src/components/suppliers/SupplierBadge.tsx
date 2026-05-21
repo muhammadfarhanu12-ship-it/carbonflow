@@ -6,6 +6,10 @@ const BADGE_STYLES: Record<SupplierRiskLevel, { label: string; className: string
     label: "High Risk",
     className: "border-red-200 bg-red-50 text-red-700",
   },
+  CRITICAL: {
+    label: "Critical Risk",
+    className: "border-rose-300 bg-rose-50 text-rose-800",
+  },
   MEDIUM: {
     label: "Medium Risk",
     className: "border-amber-200 bg-amber-50 text-amber-700",

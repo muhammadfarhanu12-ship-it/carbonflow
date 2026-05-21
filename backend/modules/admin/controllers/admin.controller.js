@@ -52,6 +52,28 @@ exports.deactivateEmissionFactor = async (req, res) => sendSuccess(res, {
   data: await AdminService.deactivateEmissionFactor(req.params.id, req.admin),
 });
 
+exports.getSupplierBenchmarks = async (req, res) => sendSuccess(res, {
+  message: "Supplier benchmarks fetched successfully",
+  data: await AdminService.listSupplierBenchmarks(req.query),
+});
+
+exports.createSupplierBenchmark = async (req, res) => sendSuccess(res, {
+  statusCode: 201,
+  message: "Supplier benchmark created successfully",
+  data: await AdminService.createSupplierBenchmark(req.body, req.admin),
+});
+
+exports.uploadSupplierBenchmarkCsv = async (req, res) => sendSuccess(res, {
+  statusCode: 201,
+  message: "Supplier benchmark CSV uploaded successfully",
+  data: await AdminService.uploadSupplierBenchmarkCsv(req.body, req.admin),
+});
+
+exports.deactivateSupplierBenchmark = async (req, res) => sendSuccess(res, {
+  message: "Supplier benchmark deactivated successfully",
+  data: await AdminService.deactivateSupplierBenchmark(req.params.id, req.admin),
+});
+
 exports.getReports = async (req, res) => sendSuccess(res, {
   message: "Reports fetched successfully",
   data: await AdminService.listReports(req.query),

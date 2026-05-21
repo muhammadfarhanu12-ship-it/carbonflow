@@ -105,6 +105,27 @@ export interface CarbonDataRecord {
   carrier: string;
 }
 
+export interface SupplierBenchmarkRecord {
+  id: string;
+  category: string;
+  region: string;
+  country?: string | null;
+  industryCode?: string | null;
+  averageIntensity: number;
+  medianIntensity?: number | null;
+  percentile25?: number | null;
+  percentile75?: number | null;
+  sourceName: string;
+  sourceYear: number;
+  version: string;
+  isOfficial: boolean;
+  isSample: boolean;
+  isActive: boolean;
+  provider: 'uploaded_csv' | 'external' | 'manual';
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+}
+
 export interface AdminSettings {
   id: string;
   platformName: string;

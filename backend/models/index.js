@@ -3,6 +3,8 @@ const Admin = require("./admin.model");
 const Company = require("./company.model");
 const Organization = require("./organization.model");
 const Supplier = require("./supplier.model");
+const SupplierEvidence = require("./supplierEvidence.model");
+const SupplierBenchmark = require("./supplierBenchmark.model");
 const Shipment = require("./shipment.model");
 const LedgerEntry = require("./ledger.model");
 const CarbonProject = require("./project.model");
@@ -29,6 +31,8 @@ module.exports = {
   Company,
   Organization,
   Supplier,
+  SupplierEvidence,
+  SupplierBenchmark,
   Shipment,
   LedgerEntry,
   CarbonProject,

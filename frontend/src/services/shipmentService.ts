@@ -10,17 +10,20 @@ import type {
 import { normalizePaginatedResponse } from "@/src/utils/apiResponse";
 
 export interface ShipmentPayload {
-  supplierId: string;
+  supplierId?: string;
   reference: string;
   origin: string;
   destination: string;
   distanceKm: number;
+  distanceUnit?: "km";
   transportMode: TransportMode;
   carrier: string;
   vehicleType?: string;
   fuelType?: string;
   weightKg: number;
+  weightUnit?: "kg" | "tonnes";
   costUsd: number;
+  currency?: string;
   status?: Shipment["status"];
   shipmentDate?: string;
   notes?: string;

@@ -7,6 +7,7 @@ const adminController = require("../controllers/admin.controller");
 const {
   verifyAdminToken,
   optionalAdminToken,
+  requireAdminPermission,
   requireAdminRole,
 } = require("../middleware/adminAuthMiddleware");
 const {
@@ -37,22 +38,27 @@ router.use(verifyAdminToken);
 
 router.get("/dashboard", catchAsync(adminController.getDashboard));
 
-router.get("/users", listUsersValidator, validateRequest, catchAsync(adminController.getUsers));
-router.patch("/users/:id/status", userStatusValidator, validateRequest, catchAsync(adminController.updateUserStatus));
-router.delete("/users/:id", requireAdminRole("superadmin"), deleteUserValidator, validateRequest, catchAsync(adminController.deleteUser));
+router.get("/users", requireAdminPermission("user:manage"), listUsersValidator, validateRequest, catchAsync(adminController.getUsers));
+router.patch("/users/:id/status", requireAdminPermission("user:manage"), userStatusValidator, validateRequest, catchAsync(adminController.updateUserStatus));
+router.delete("/users/:id", requireAdminPermission("user:manage"), requireAdminRole("superadmin"), deleteUserValidator, validateRequest, catchAsync(adminController.deleteUser));
 
 router.get("/analytics", analyticsValidator, validateRequest, catchAsync(adminController.getAnalytics));
 router.get("/carbon-data", carbonDataValidator, validateRequest, catchAsync(adminController.getCarbonData));
 
-router.get("/emission-factors", requireAdminRole("owner", "superadmin", "admin"), catchAsync(adminController.getEmissionFactors));
-router.post("/emission-factors", requireAdminRole("owner", "superadmin", "admin"), catchAsync(adminController.createEmissionFactor));
-router.put("/emission-factors/:id", requireAdminRole("owner", "superadmin", "admin"), catchAsync(adminController.updateEmissionFactor));
-router.patch("/emission-factors/:id", requireAdminRole("owner", "superadmin", "admin"), catchAsync(adminController.updateEmissionFactor));
-router.patch("/emission-factors/:id/deactivate", requireAdminRole("owner", "superadmin", "admin"), catchAsync(adminController.deactivateEmissionFactor));
+router.get("/emission-factors", requireAdminPermission("factor:manage"), catchAsync(adminController.getEmissionFactors));
+router.post("/emission-factors", requireAdminPermission("factor:manage"), catchAsync(adminController.createEmissionFactor));
+router.put("/emission-factors/:id", requireAdminPermission("factor:manage"), catchAsync(adminController.updateEmissionFactor));
+router.patch("/emission-factors/:id", requireAdminPermission("factor:manage"), catchAsync(adminController.updateEmissionFactor));
+router.patch("/emission-factors/:id/deactivate", requireAdminPermission("factor:manage"), catchAsync(adminController.deactivateEmissionFactor));
+
+router.get("/supplier-benchmarks", requireAdminPermission("factor:manage"), catchAsync(adminController.getSupplierBenchmarks));
+router.post("/supplier-benchmarks", requireAdminPermission("factor:manage"), catchAsync(adminController.createSupplierBenchmark));
+router.post("/supplier-benchmarks/upload-csv", requireAdminPermission("factor:manage"), catchAsync(adminController.uploadSupplierBenchmarkCsv));
+router.patch("/supplier-benchmarks/:id/deactivate", requireAdminPermission("factor:manage"), catchAsync(adminController.deactivateSupplierBenchmark));
 
 router.get("/reports", reportsValidator, validateRequest, catchAsync(adminController.getReports));
-router.patch("/reports/:id", updateReportValidator, validateRequest, catchAsync(adminController.updateReport));
-router.delete("/reports/:id", requireAdminRole("superadmin"), reportIdValidator, validateRequest, catchAsync(adminController.deleteReport));
+router.patch("/reports/:id", requireAdminPermission("report:generate"), updateReportValidator, validateRequest, catchAsync(adminController.updateReport));
+router.delete("/reports/:id", requireAdminPermission("report:generate"), requireAdminRole("superadmin"), reportIdValidator, validateRequest, catchAsync(adminController.deleteReport));
 
 router.get("/settings", catchAsync(adminController.getSettings));
 router.put("/settings", requireAdminRole("superadmin"), settingsValidator, validateRequest, catchAsync(adminController.updateSettings));

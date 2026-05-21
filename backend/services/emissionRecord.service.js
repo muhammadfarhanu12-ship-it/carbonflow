@@ -368,6 +368,8 @@ class EmissionRecordService {
       costUsd: Number(shipment.costUsd || 0),
       factorValue: computed.factorKgPerTonKm,
       factorUnit: "kgCO2e/ton-km",
+      factorSource: shipment.factorSource || "CarbonFlow sample logistics factors",
+      factorIsSample: true,
       activityData: {
         reference: shipment.reference,
         origin: shipment.origin,
@@ -375,13 +377,17 @@ class EmissionRecordService {
         carrier: shipment.carrier,
         supplierName: supplier?.name || null,
         distanceKm: computed.distanceKm,
+        distanceUnit: shipment.distanceUnit || "km",
         weightKg: computed.weightKg,
+        weightUnit: shipment.weightUnit || "kg",
         tonKm: computed.tonKm,
         transportMode: computed.transportMode,
+        fuelType: shipment.fuelType || null,
       },
       metadata: {
         status: shipment.status,
         carbonCostUsd: Number(shipment.carbonCostUsd || 0),
+        calculationStatus: shipment.calculationStatus || (computed.factorKgPerTonKm > 0 ? "calculated" : "missing_factor"),
       },
       occurredAt: shipment.shipmentDate || shipment.createdAt || new Date(),
     });

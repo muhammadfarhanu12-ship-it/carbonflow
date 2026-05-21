@@ -12,12 +12,18 @@ const shipmentIdValidator = [
 ];
 
 const shipmentCreateValidators = [
-  body("supplierId").isUUID().withMessage("supplierId must be a valid UUID"),
+  body("supplierId").optional({ checkFalsy: true }).isUUID().withMessage("supplierId must be a valid UUID"),
   body("reference").trim().isLength({ min: 3, max: 120 }).withMessage("reference must be between 3 and 120 characters"),
   body("origin").trim().isLength({ min: 2, max: 180 }).withMessage("origin is required"),
   body("destination").trim().isLength({ min: 2, max: 180 }).withMessage("destination is required"),
   body("transportMode").isIn(["ROAD", "RAIL", "AIR", "OCEAN"]).withMessage("transportMode is invalid"),
   body("carrier").trim().isLength({ min: 2, max: 120 }).withMessage("carrier is required"),
+  body("fuelType").custom((value, { req }) => {
+    if (["ROAD", "RAIL", "AIR", "OCEAN"].includes(req.body.transportMode) && !String(value || "").trim()) {
+      throw new Error("fuelType is required for this transport mode");
+    }
+    return true;
+  }),
   body("distanceKm").isFloat({ min: 0.001 }).withMessage("distanceKm must be greater than zero"),
   body("weightKg").isFloat({ min: 0.001 }).withMessage("weightKg must be greater than zero"),
   body("costUsd").isFloat({ min: 0 }).withMessage("costUsd must be zero or positive"),
@@ -30,12 +36,18 @@ const shipmentCreateValidators = [
 
 const shipmentUpdateValidators = [
   ...shipmentIdValidator,
-  body("supplierId").optional().isUUID().withMessage("supplierId must be a valid UUID"),
+  body("supplierId").optional({ checkFalsy: true }).isUUID().withMessage("supplierId must be a valid UUID"),
   body("reference").optional().trim().isLength({ min: 3, max: 120 }).withMessage("reference must be between 3 and 120 characters"),
   body("origin").optional().trim().isLength({ min: 2, max: 180 }).withMessage("origin must be between 2 and 180 characters"),
   body("destination").optional().trim().isLength({ min: 2, max: 180 }).withMessage("destination must be between 2 and 180 characters"),
   body("transportMode").optional().isIn(["ROAD", "RAIL", "AIR", "OCEAN"]).withMessage("transportMode is invalid"),
   body("carrier").optional().trim().isLength({ min: 2, max: 120 }).withMessage("carrier must be between 2 and 120 characters"),
+  body("fuelType").optional({ nullable: true }).custom((value, { req }) => {
+    if (req.body.transportMode && ["ROAD", "RAIL", "AIR", "OCEAN"].includes(req.body.transportMode) && !String(value || "").trim()) {
+      throw new Error("fuelType is required for this transport mode");
+    }
+    return true;
+  }),
   body("distanceKm").optional().isFloat({ min: 0.001 }).withMessage("distanceKm must be greater than zero"),
   body("weightKg").optional().isFloat({ min: 0.001 }).withMessage("weightKg must be greater than zero"),
   body("costUsd").optional().isFloat({ min: 0 }).withMessage("costUsd must be zero or positive"),
