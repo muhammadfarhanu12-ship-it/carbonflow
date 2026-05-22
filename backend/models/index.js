@@ -21,9 +21,14 @@ const PlatformSetting = require("./platformSetting.model");
 const Subscription = require("./subscription.model");
 const Transaction = require("./transaction.model");
 const OffsetTransaction = require("./offsetTransaction.model");
+const MarketplaceBudget = require("./marketplaceBudget.model");
+const MarketplaceBudgetRequest = require("./marketplaceBudgetRequest.model");
+const AutoOffsetRule = require("./autoOffsetRule.model");
 const Cost = require("./cost.model");
 const Transport = require("./transport.model");
 const UserLog = require("./userLog.model");
+const OptimizationRun = require("./optimizationRun.model");
+const OptimizationRecommendation = require("./optimizationRecommendation.model");
 
 module.exports = {
   User,
@@ -49,7 +54,12 @@ module.exports = {
   Subscription,
   Transaction,
   OffsetTransaction,
+  MarketplaceBudget,
+  MarketplaceBudgetRequest,
+  AutoOffsetRule,
   Cost,
   Transport,
   UserLog,
+  OptimizationRun,
+  OptimizationRecommendation,
 };

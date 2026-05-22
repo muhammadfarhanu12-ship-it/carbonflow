@@ -22,6 +22,14 @@ export interface ProjectManagementFormValues {
   projectName: string;
   category: ProjectManagementCategory;
   registry: ProjectManagementRegistry;
+  registryProjectId: string;
+  registryUrl: string;
+  methodology: string;
+  country: string;
+  region: string;
+  verificationStatus: "UNVERIFIED" | "SELF_REPORTED" | "THIRD_PARTY_VERIFIED" | "REGISTRY_VERIFIED";
+  isDemo: boolean;
+  isRealInventory: boolean;
   description: string;
   location: string;
   latitude: number | "";
@@ -47,6 +55,14 @@ const defaultFormValues: ProjectManagementFormValues = {
   projectName: "",
   category: "Forestry",
   registry: "Gold Standard",
+  registryProjectId: "",
+  registryUrl: "",
+  methodology: "",
+  country: "",
+  region: "",
+  verificationStatus: "UNVERIFIED",
+  isDemo: false,
+  isRealInventory: false,
   description: "",
   location: "",
   latitude: "",
@@ -72,6 +88,12 @@ export function ProjectManagementModal({
   const projectNameId = useId();
   const categoryId = useId();
   const registryId = useId();
+  const registryProjectIdId = useId();
+  const registryUrlId = useId();
+  const methodologyId = useId();
+  const countryId = useId();
+  const regionId = useId();
+  const verificationStatusId = useId();
   const locationId = useId();
   const vintageYearId = useId();
   const totalSupplyId = useId();
@@ -99,6 +121,11 @@ export function ProjectManagementModal({
       projectName: formValues.projectName.trim(),
       location: formValues.location.trim(),
       description: formValues.description.trim(),
+      registryProjectId: formValues.registryProjectId.trim(),
+      registryUrl: formValues.registryUrl.trim(),
+      methodology: formValues.methodology.trim(),
+      country: formValues.country.trim(),
+      region: formValues.region.trim(),
       pddDocuments: formValues.pddDocuments
         .map((document) => ({
           name: document.name.trim(),
@@ -184,6 +211,73 @@ export function ProjectManagementModal({
                 <option key={option} value={option}>{option}</option>
               ))}
             </select>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor={registryProjectIdId}>Registry Project ID</Label>
+            <Input
+              id={registryProjectIdId}
+              placeholder="Registry project identifier"
+              value={formValues.registryProjectId}
+              onChange={(event) => setFormValues((current) => ({ ...current, registryProjectId: event.target.value }))}
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor={registryUrlId}>Registry URL</Label>
+            <Input
+              id={registryUrlId}
+              type="url"
+              placeholder="https://registry.example/projects/123"
+              value={formValues.registryUrl}
+              onChange={(event) => setFormValues((current) => ({ ...current, registryUrl: event.target.value }))}
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor={methodologyId}>Methodology</Label>
+            <Input
+              id={methodologyId}
+              placeholder="Methodology code or protocol"
+              value={formValues.methodology}
+              onChange={(event) => setFormValues((current) => ({ ...current, methodology: event.target.value }))}
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor={verificationStatusId}>Verification Status</Label>
+            <select
+              id={verificationStatusId}
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              value={formValues.verificationStatus}
+              onChange={(event) => setFormValues((current) => ({
+                ...current,
+                verificationStatus: event.target.value as ProjectManagementFormValues["verificationStatus"],
+              }))}
+            >
+              <option value="UNVERIFIED">Unverified</option>
+              <option value="SELF_REPORTED">Self Reported</option>
+              <option value="THIRD_PARTY_VERIFIED">Third Party Verified</option>
+              <option value="REGISTRY_VERIFIED">Registry Verified</option>
+            </select>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor={countryId}>Country</Label>
+            <Input
+              id={countryId}
+              value={formValues.country}
+              onChange={(event) => setFormValues((current) => ({ ...current, country: event.target.value }))}
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor={regionId}>Region</Label>
+            <Input
+              id={regionId}
+              value={formValues.region}
+              onChange={(event) => setFormValues((current) => ({ ...current, region: event.target.value }))}
+            />
           </div>
 
           <div className="grid gap-2">
@@ -283,6 +377,28 @@ export function ProjectManagementModal({
               />
             </div>
           </div>
+        </div>
+
+        <div className="grid gap-3 rounded-2xl border border-border bg-muted/10 p-4 md:grid-cols-2">
+          <label className="flex items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={formValues.isRealInventory}
+              onChange={(event) => setFormValues((current) => ({ ...current, isRealInventory: event.target.checked }))}
+            />
+            Mark as real inventory
+          </label>
+          <label className="flex items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={formValues.isDemo}
+              onChange={(event) => setFormValues((current) => ({ ...current, isDemo: event.target.checked, isRealInventory: event.target.checked ? false : current.isRealInventory }))}
+            />
+            Demo/test only
+          </label>
+          <p className="text-xs text-muted-foreground md:col-span-2">
+            Demo listings are not valid for real offset claims. Real inventory requires registry metadata and evidence before checkout.
+          </p>
         </div>
 
         <div className="grid gap-2">

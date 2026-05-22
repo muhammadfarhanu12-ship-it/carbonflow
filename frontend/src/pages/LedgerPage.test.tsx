@@ -207,7 +207,18 @@ describe("LedgerPage", () => {
     await userEvent.click(screen.getByRole("button", { name: /submit for review/i }));
     expect(await screen.findByText("Activity amount must be greater than 0 before submitting.")).toBeInTheDocument();
 
-    mocks.matchFactor.mockResolvedValueOnce(null);
+    mocks.matchFactor.mockImplementation((query = "") => (
+      String(query).includes("UNKNOWN")
+        ? Promise.resolve(null)
+        : Promise.resolve({
+          factorValue: 2.68,
+          value: 2.68,
+          factorUnit: "kgCO2e/liter",
+          sourceName: "CarbonFlow sample factors",
+          sourceYear: 2026,
+          isSample: true,
+        })
+    ));
     await userEvent.clear(screen.getByLabelText("Factor Key / Fuel"));
     await userEvent.type(screen.getByLabelText("Factor Key / Fuel"), "UNKNOWN");
     expect(await screen.findByText(/Missing factor warning/i)).toBeInTheDocument();

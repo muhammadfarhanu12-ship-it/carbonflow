@@ -30,14 +30,18 @@ interface MarketplaceCardProps {
 
 const statusBadgeStyles: Record<CarbonProject["status"], string> = {
   DRAFT: "border-slate-200 bg-slate-100 text-slate-700",
+  PENDING_REVIEW: "border-blue-200 bg-blue-50 text-blue-700",
   PUBLISHED: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  PAUSED: "border-orange-200 bg-orange-50 text-orange-700",
   ARCHIVED: "border-stone-200 bg-stone-100 text-stone-700",
   SOLD_OUT: "border-amber-200 bg-amber-50 text-amber-700",
 };
 
 const statusCopy: Record<CarbonProject["status"], string> = {
   DRAFT: "Draft",
+  PENDING_REVIEW: "Pending Review",
   PUBLISHED: "Published",
+  PAUSED: "Paused",
   ARCHIVED: "Archived",
   SOLD_OUT: "Sold Out",
 };
@@ -171,9 +175,8 @@ export function MarketplaceCard({
         : []
     ) as RegistryBadgeKey[],
   );
-  const verificationStatus = project.verificationDetails?.verificationStatus
-    || (activeRegistries.size > 0 ? "VERIFIED" : "PENDING");
-  const isVerified = verificationStatus === "VERIFIED";
+  const rawVerificationStatus = project.verificationStatus || "UNVERIFIED";
+  const isVerified = rawVerificationStatus === "REGISTRY_VERIFIED" || rawVerificationStatus === "THIRD_PARTY_VERIFIED";
   const vintageYear = project.verificationDetails?.vintageYear || project.vintageYear || new Date().getUTCFullYear();
   const sdgGoals = (project.verificationDetails?.sdgGoals?.length
     ? project.verificationDetails.sdgGoals
@@ -192,7 +195,11 @@ export function MarketplaceCard({
       ? "Archived listings stay available for audit review but cannot be purchased."
       : project.status === "DRAFT"
         ? "Draft listings stay hidden until you publish them."
-        : project.status === "SOLD_OUT"
+        : project.status === "PAUSED"
+          ? "Paused listings are visible to managers but cannot be purchased."
+          : project.status === "PENDING_REVIEW"
+            ? "Pending review listings must be approved before buyer checkout."
+            : project.status === "SOLD_OUT"
           ? "Published listing with no purchasable inventory remaining."
           : availableToPurchase === 0
             ? "Inventory is temporarily reserved by another checkout."
@@ -289,7 +296,10 @@ export function MarketplaceCard({
 
         <div className="space-y-1 text-sm text-muted-foreground">
           <div>Registry: {registry}</div>
-          <div>Status: {isVerified ? "Verified" : verificationStatus === "PENDING" ? "Pending Verification" : "Action Required"}</div>
+          <div>Registry Project ID: {project.registryProjectId || "Not provided"}</div>
+          <div>Verification: {rawVerificationStatus.replace(/_/g, " ").toLowerCase()}</div>
+          <div>Inventory Type: {project.isDemo || project.isSample ? "Demo/test only" : project.isRealInventory ? "Real inventory" : "Not marked real"}</div>
+          {project.isDemo || project.isSample ? <div className="font-medium text-amber-700">Demo listing - not valid for real offset claims.</div> : null}
           <div>Rating: {project.rating}</div>
           <div>Available: {availableToPurchase.toLocaleString()} credits</div>
           {project.reservedCredits > 0 ? <div>Reserved: {project.reservedCredits.toLocaleString()} credits</div> : null}

@@ -90,11 +90,34 @@ describe("ReportsService", () => {
   test("rejects invalid report generation payload before database write", async () => {
     await expect(ReportsService.generate({ name: "", type: "BAD", format: "TXT" }, "company-1"))
       .rejects
-      .toThrow(/Report name, valid type, and valid format are required/);
+      .toThrow(/Report name is required/);
   });
 
   test("defaults generated reports to approved records only", async () => {
-    const createSpy = jest.spyOn(Report, "create").mockImplementation(async (payload) => ({ id: "report-1", ...payload }));
+    const createSpy = jest.spyOn(Report, "create").mockImplementation(async (payload) => ({ id: "report-1", ...payload, save: jest.fn().mockResolvedValue(undefined) }));
+    jest.spyOn(ReportsService, "readiness").mockResolvedValue({
+      approvedRecordsCount: 1,
+      draftRecordsCount: 0,
+      submittedRecordsCount: 0,
+      rejectedRecordsCount: 0,
+      needsCorrectionRecordsCount: 0,
+      missingFactorCount: 0,
+      sampleFactorCount: 0,
+      staleFactorCount: 0,
+      zeroAmountCount: 0,
+      calculationErrorCount: 0,
+      supplierLinkedCount: 0,
+      unlinkedSupplierCount: 0,
+      officialFactorCount: 1,
+      customFactorCount: 0,
+      reportingPeriodCoverage: { recordCount: 1 },
+      canGenerateApprovedReport: true,
+      canGenerateInternalReport: true,
+      blockers: [],
+      warnings: [],
+      recommendations: [],
+    });
+    jest.spyOn(ReportsService, "buildDataset").mockResolvedValue(buildDataset());
     jest.spyOn(AuditService, "log").mockResolvedValue({});
 
     const report = await ReportsService.generate({
@@ -110,7 +133,30 @@ describe("ReportsService", () => {
   });
 
   test("defaults generated report format to PDF", async () => {
-    const createSpy = jest.spyOn(Report, "create").mockImplementation(async (payload) => ({ id: "report-1", ...payload }));
+    const createSpy = jest.spyOn(Report, "create").mockImplementation(async (payload) => ({ id: "report-1", ...payload, save: jest.fn().mockResolvedValue(undefined) }));
+    jest.spyOn(ReportsService, "readiness").mockResolvedValue({
+      approvedRecordsCount: 1,
+      draftRecordsCount: 0,
+      submittedRecordsCount: 0,
+      rejectedRecordsCount: 0,
+      needsCorrectionRecordsCount: 0,
+      missingFactorCount: 0,
+      sampleFactorCount: 0,
+      staleFactorCount: 0,
+      zeroAmountCount: 0,
+      calculationErrorCount: 0,
+      supplierLinkedCount: 0,
+      unlinkedSupplierCount: 0,
+      officialFactorCount: 1,
+      customFactorCount: 0,
+      reportingPeriodCoverage: { recordCount: 1 },
+      canGenerateApprovedReport: true,
+      canGenerateInternalReport: true,
+      blockers: [],
+      warnings: [],
+      recommendations: [],
+    });
+    jest.spyOn(ReportsService, "buildDataset").mockResolvedValue(buildDataset());
     jest.spyOn(AuditService, "log").mockResolvedValue({});
 
     const report = await ReportsService.generate({
@@ -119,10 +165,10 @@ describe("ReportsService", () => {
     }, "company-1", { id: "manager-1", email: "manager@example.com" });
 
     expect(report.format).toBe("PDF");
-    expect(report.downloadUrl).toMatch(/\.pdf$/);
+    expect(report.downloadUrl).toMatch(/\/api\/reports\/report-1\/download$/);
     expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
       format: "PDF",
-      downloadUrl: expect.stringMatching(/\.pdf$/),
+      downloadUrl: "/api/reports/pending/download",
     }));
   });
 
@@ -186,10 +232,12 @@ describe("ReportsService", () => {
 
   test("buildDataset filters to approved records and aggregates linked suppliers", async () => {
     jest.spyOn(DashboardService, "getMetrics").mockResolvedValue(buildDataset().dashboard);
-    jest.spyOn(Shipment, "find").mockReturnValue({ sort: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([]) }) });
-    jest.spyOn(Supplier, "find").mockReturnValue({ sort: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([{ _id: "supplier-1", name: "Acme Fuels", category: "Fuel", country: "US", riskLevel: "HIGH" }]) }) });
-    jest.spyOn(Setting, "findOne").mockResolvedValue({ companyName: "Acme Carbon" });
-    jest.spyOn(Transaction, "find").mockReturnValue({ sort: jest.fn().mockReturnValue({ limit: jest.fn().mockResolvedValue([]) }) });
+    jest.spyOn(Shipment, "find").mockReturnValue({ sort: jest.fn().mockReturnValue({ limit: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }) }) });
+    jest.spyOn(Supplier, "find").mockReturnValue({ sort: jest.fn().mockReturnValue({ limit: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([{ _id: "supplier-1", name: "Acme Fuels", category: "Fuel", country: "US", riskLevel: "HIGH" }]) }) }) });
+    jest.spyOn(Setting, "findOne").mockReturnValue({ lean: jest.fn().mockResolvedValue({ companyName: "Acme Carbon" }) });
+    jest.spyOn(Transaction, "find").mockReturnValue({ sort: jest.fn().mockReturnValue({ limit: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }) }) });
+    jest.spyOn(Report, "countDocuments").mockResolvedValue(1);
+    jest.spyOn(require("../services/emissionRecord.service"), "buildFactorGovernance").mockResolvedValue({ isStaleFactor: false });
     const recordFind = jest.spyOn(EmissionRecord, "find").mockReturnValue({
       sort: jest.fn().mockReturnValue({
         limit: jest.fn().mockReturnValue({

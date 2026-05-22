@@ -1,4 +1,3 @@
-const crypto = require("crypto");
 const { Company, Setting } = require("../models");
 const env = require("../config/env");
 const EmissionRecordService = require("./emissionRecord.service");
@@ -25,7 +24,7 @@ class UserContextService {
       primaryElectricityRegion: overrides.primaryElectricityRegion || overrides.region || "GLOBAL",
       carbonTargetYear: Number(overrides.netZeroTargetYear || 2040),
       carbonPricePerTon: Number(overrides.carbonPricePerTon || env.carbonPricePerTon),
-      apiKey: `cf_${crypto.randomBytes(12).toString("hex")}`,
+      apiKey: null,
       status: "TRIAL",
     });
 
@@ -56,11 +55,8 @@ class UserContextService {
       },
       notificationsEnabled: true,
       securityAlertsEnabled: true,
-      integrations: [
-        { name: "ERP Feed", status: "CONNECTED", lastSync: new Date().toISOString() },
-        { name: "Carrier API", status: "PENDING", lastSync: null },
-      ],
-      apiKeys: [{ label: "Primary API Key", key: company.apiKey, createdAt: new Date().toISOString() }],
+      integrations: [],
+      apiKeys: [],
     });
 
     user.companyId = company.id;
@@ -106,7 +102,7 @@ class UserContextService {
           notificationsEnabled: true,
           securityAlertsEnabled: true,
           integrations: [],
-          apiKeys: company.apiKey ? [{ label: "Primary API Key", key: company.apiKey, createdAt: new Date().toISOString() }] : [],
+          apiKeys: [],
         });
         await EmissionRecordService.syncOperationalRecords(company.id, settings);
       }

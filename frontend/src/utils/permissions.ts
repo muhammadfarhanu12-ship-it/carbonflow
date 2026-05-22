@@ -21,8 +21,21 @@ export type Permission =
   | "ledger:financial:create"
   | "ledger:financial:update"
   | "audit:view"
+  | "audit:export"
   | "report:generate"
   | "report:view"
+  | "report:download"
+  | "report:archive"
+  | "report:regenerate"
+  | "report:custom_extract"
+  | "settings:view"
+  | "settings:profile:update"
+  | "settings:organization:update"
+  | "settings:emissions:update"
+  | "settings:team:manage"
+  | "settings:security:update"
+  | "settings:api_keys:manage"
+  | "settings:integrations:manage"
   | "user:manage";
 
 const ROLE_ALIASES: Record<string, string> = {
@@ -58,8 +71,21 @@ const ALL_PERMISSIONS: Permission[] = [
   "ledger:financial:create",
   "ledger:financial:update",
   "audit:view",
+  "audit:export",
   "report:generate",
   "report:view",
+  "report:download",
+  "report:archive",
+  "report:regenerate",
+  "report:custom_extract",
+  "settings:view",
+  "settings:profile:update",
+  "settings:organization:update",
+  "settings:emissions:update",
+  "settings:team:manage",
+  "settings:security:update",
+  "settings:api_keys:manage",
+  "settings:integrations:manage",
   "user:manage",
 ];
 
@@ -76,6 +102,9 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "supplier:evidence:view",
     "report:generate",
     "report:view",
+    "report:download",
+    "report:regenerate",
+    "report:custom_extract",
     "emission:view",
     "emission:create",
     "emission:update",
@@ -86,10 +115,19 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "ledger:financial:create",
     "ledger:financial:update",
     "audit:view",
+    "audit:export",
+    "settings:view",
+    "settings:profile:update",
+    "settings:organization:update",
+    "settings:emissions:update",
+    "settings:team:manage",
+    "settings:security:update",
+    "settings:api_keys:manage",
+    "settings:integrations:manage",
   ],
-  data_entry: ["supplier:view", "supplier:create", "supplier:update", "supplier:evidence:view", "report:view", "emission:view", "emission:create", "emission:update", "emission:submit"],
-  viewer: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "report:view", "emission:view"],
-  auditor: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "supplier:audit:view", "report:view", "emission:view", "audit:view"],
+  data_entry: ["supplier:view", "supplier:create", "supplier:update", "supplier:evidence:view", "report:view", "emission:view", "emission:create", "emission:update", "emission:submit", "settings:view", "settings:profile:update", "settings:security:update"],
+  viewer: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "report:view", "emission:view", "settings:view"],
+  auditor: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "supplier:audit:view", "report:view", "report:download", "emission:view", "audit:view", "audit:export", "settings:view"],
 };
 
 export const NO_PERMISSION_MESSAGE = "You do not have permission to perform this action.";

@@ -160,4 +160,89 @@ describe("enterprise audit logs", () => {
     }));
     expect(result.data[0].id).toBe("audit-1");
   });
+
+  test("redacts sensitive values before returning audit payloads", () => {
+    const result = AuditService.sanitizeValue({
+      email: "security@example.com",
+      password: "plaintext",
+      nested: {
+        apiKey: "secret-api-key",
+        authorization: "Bearer raw-token",
+      },
+    });
+
+    expect(result).toEqual({
+      email: "security@example.com",
+      password: "[REDACTED]",
+      nested: {
+        apiKey: "[REDACTED]",
+        authorization: "[REDACTED]",
+      },
+    });
+  });
+
+  test("CSV export protects spreadsheet formula injection and logs export event", async () => {
+    const rows = [{
+      _id: "audit-2",
+      companyId: "company-1",
+      userEmail: "=malicious@example.com",
+      action: "report_downloaded",
+      actionLabel: "Report downloaded",
+      entityType: "Report",
+      entityId: "report-1",
+      module: "report",
+      severity: "medium",
+      category: "download",
+      source: "web",
+      status: "success",
+      createdAt: new Date("2026-05-20T00:00:00.000Z"),
+    }];
+    const lean = jest.fn().mockResolvedValue(rows);
+    const limit = jest.fn().mockReturnValue({ lean });
+    const sort = jest.fn().mockReturnValue({ limit });
+    jest.spyOn(AuditLog, "find").mockReturnValue({ sort });
+    const logSpy = jest.spyOn(AuditService, "log").mockResolvedValue({});
+
+    const exported = await AuditService.export("company-1", { format: "csv" }, { id: "admin-1", email: "admin@example.com" }, { requestId: "req-1" });
+
+    expect(exported.contentType).toContain("text/csv");
+    expect(exported.content).toContain("\"'=malicious@example.com\"");
+    expect(logSpy).toHaveBeenCalledWith(expect.objectContaining({
+      action: "audit_log_exported",
+      companyId: "company-1",
+      category: "export",
+    }));
+  });
+
+  test("JSON export is company scoped through the audit filter", async () => {
+    const lean = jest.fn().mockResolvedValue([]);
+    const limit = jest.fn().mockReturnValue({ lean });
+    const sort = jest.fn().mockReturnValue({ limit });
+    jest.spyOn(AuditLog, "find").mockReturnValue({ sort });
+    jest.spyOn(AuditService, "log").mockResolvedValue({});
+
+    const exported = await AuditService.export("company-2", { format: "json", severity: "critical" }, { id: "auditor-1" });
+
+    expect(AuditLog.find).toHaveBeenCalledWith(expect.objectContaining({
+      companyId: "company-2",
+      severity: "critical",
+    }));
+    expect(exported.contentType).toContain("application/json");
+  });
+
+  test("detail lookup enforces company scoping", async () => {
+    jest.spyOn(AuditLog, "findOne").mockReturnValue({
+      lean: jest.fn().mockResolvedValue({
+        _id: "audit-3",
+        companyId: "company-1",
+        action: "user_role_changed",
+        createdAt: new Date("2026-05-20T00:00:00.000Z"),
+      }),
+    });
+
+    const result = await AuditService.getById("company-1", "audit-3");
+
+    expect(AuditLog.findOne).toHaveBeenCalledWith({ _id: "audit-3", companyId: "company-1" });
+    expect(result.actionLabel).toBe("User role changed");
+  });
 });

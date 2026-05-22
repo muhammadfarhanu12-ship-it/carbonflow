@@ -42,6 +42,7 @@ import { socketService } from "@/src/services/socketService";
 import type {
   CarbonCreditTransaction,
   CarbonProject,
+  MarketplaceBudget,
   MarketplaceListingStatus,
   Shipment,
 } from "@/src/types/platform";
@@ -49,13 +50,14 @@ import { cn } from "@/src/utils/cn";
 import { BATCH_OFFSET_SELECTION_STORAGE_KEY } from "@/src/constants/batchOffset";
 
 const MANAGEABLE_ROLES = new Set(["ADMIN", "SUPERADMIN", "MANAGER"]);
-const AUTO_OFFSET_STORAGE_PREFIX = "marketplace.autoOffsetRule";
 const SHIPMENT_BURN_LOOKBACK_DAYS = 90;
 
 const lifecycleFilters: Array<{ label: string; value: "ALL" | MarketplaceListingStatus }> = [
   { label: "All Listings", value: "ALL" },
   { label: "Published", value: "PUBLISHED" },
   { label: "Draft", value: "DRAFT" },
+  { label: "Pending Review", value: "PENDING_REVIEW" },
+  { label: "Paused", value: "PAUSED" },
   { label: "Archived", value: "ARCHIVED" },
   { label: "Sold Out", value: "SOLD_OUT" },
 ];
@@ -69,6 +71,12 @@ const initialCheckoutForm = {
 const initialAutoOffsetRule = {
   enabled: false,
   intensityThreshold: 0.8,
+  carbonIntensityThreshold: 0.8,
+  preferredProjectTypes: [] as string[],
+  preferredRegistries: [] as string[],
+  requireApproval: true,
+  maxSpendPerMonth: null as number | null,
+  isConfigured: false,
 };
 
 const SORT_FILTER_LABELS: Record<MarketplaceSortFilter, string> = {
@@ -79,31 +87,12 @@ const SORT_FILTER_LABELS: Record<MarketplaceSortFilter, string> = {
 
 const STATUS_FILTER_LABELS: Record<MarketplaceListingStatus, string> = {
   DRAFT: "Draft",
+  PENDING_REVIEW: "Pending Review",
   PUBLISHED: "Published",
+  PAUSED: "Paused",
   ARCHIVED: "Archived",
   SOLD_OUT: "Sold Out",
 };
-
-const FALLBACK_RECOMMENDATIONS: MarketplaceRecommendation[] = [
-  {
-    id: "fallback-blue-carbon",
-    name: "Delta Mangrove Restoration",
-    type: "Blue Carbon",
-    location: "Southeast Asia",
-    pricePerTonUsd: 24,
-    rating: 4.8,
-    registry: "Verra",
-  },
-  {
-    id: "fallback-renewable",
-    name: "Cross-Border Wind Portfolio",
-    type: "Renewable Energy",
-    location: "Central Europe",
-    pricePerTonUsd: 18,
-    rating: 4.7,
-    registry: "Gold Standard",
-  },
-];
 
 function getProjectAvailableInventory(project: CarbonProject | null) {
   if (!project) {
@@ -139,6 +128,16 @@ function mapProjectToForm(project: CarbonProject): ProjectManagementFormValues {
     projectName: project.name,
     category,
     registry: registry === "Verra" ? "Verra" : "Gold Standard",
+    registryProjectId: project.registryProjectId || "",
+    registryUrl: project.registryUrl || "",
+    methodology: project.methodology || "",
+    country: project.country || "",
+    region: project.region || "",
+    verificationStatus: project.verificationStatus && ["UNVERIFIED", "SELF_REPORTED", "THIRD_PARTY_VERIFIED", "REGISTRY_VERIFIED"].includes(project.verificationStatus)
+      ? project.verificationStatus as ProjectManagementFormValues["verificationStatus"]
+      : "UNVERIFIED",
+    isDemo: Boolean(project.isDemo || project.isSample),
+    isRealInventory: Boolean(project.isRealInventory),
     description: project.description || "",
     location: project.location || "",
     latitude: project.coordinates?.latitude ?? "",
@@ -163,6 +162,12 @@ function buildProjectPayload(formValues: ProjectManagementFormValues): ProjectPa
     type: formValues.category,
     location: formValues.location.trim(),
     description: formValues.description.trim() || null,
+    methodology: formValues.methodology.trim() || null,
+    registryName: formValues.registry,
+    registryProjectId: formValues.registryProjectId.trim() || null,
+    registryUrl: formValues.registryUrl.trim() || null,
+    country: formValues.country.trim() || null,
+    region: formValues.region.trim() || null,
     coordinates: {
       latitude: formValues.latitude === "" ? null : formValues.latitude,
       longitude: formValues.longitude === "" ? null : formValues.longitude,
@@ -181,21 +186,35 @@ function buildProjectPayload(formValues: ProjectManagementFormValues): ProjectPa
     pricePerCreditUsd: formValues.price,
     pricePerTonUsd: formValues.price,
     availableCredits: formValues.totalSupply,
+    totalQuantityTco2e: formValues.totalSupply,
+    verificationStatus: formValues.verificationStatus,
+    isDemo: formValues.isDemo,
+    isSample: formValues.isDemo,
+    isRealInventory: formValues.isDemo ? false : formValues.isRealInventory,
+    evidenceDocuments: formValues.pddDocuments
+      .map((document) => ({
+        name: document.name.trim() || "Evidence document",
+        url: document.url.trim(),
+      }))
+      .filter((document) => document.url),
     status: nextStatus,
   };
 }
 
 function resolveTransactionReference(transaction: CarbonCreditTransaction) {
-  return transaction.registryRecordId
-    || transaction.blockchainHash
+  if (transaction.isDemo) {
+    return transaction.certificateId || transaction.serialNumber || "Demo certificate";
+  }
+
+  return transaction.registryRetirementId
+    || transaction.registryRecordId
     || transaction.serialNumber
-    || (transaction.status === "COMPLETED" ? "Recorded" : "Pending");
+    || (transaction.status === "COMPLETED" ? "CarbonFlow record only" : "Pending");
 }
 
 export function MarketplacePage() {
   const { showToast } = useToast();
   const sessionUser = authService.getSession().user;
-  const autoOffsetStorageKey = `${AUTO_OFFSET_STORAGE_PREFIX}:${sessionUser?.companyId || "default"}`;
   const canManageListings = MANAGEABLE_ROLES.has(sessionUser?.role || "");
   const [projects, setProjects] = useState<CarbonProject[]>([]);
   const [transactions, setTransactions] = useState<CarbonCreditTransaction[]>([]);
@@ -221,6 +240,8 @@ export function MarketplacePage() {
   const [projectedMonthlyShipmentBurnUsd, setProjectedMonthlyShipmentBurnUsd] = useState(0);
   const [requestingBudgetIncrease, setRequestingBudgetIncrease] = useState(false);
   const [autoOffsetRule, setAutoOffsetRule] = useState(initialAutoOffsetRule);
+  const [budget, setBudget] = useState<MarketplaceBudget | null>(null);
+  const [pendingBudgetRequests, setPendingBudgetRequests] = useState(0);
   const [recommendedProjects, setRecommendedProjects] = useState<MarketplaceRecommendation[]>([]);
 
   const selectedProject = useMemo(
@@ -246,37 +267,24 @@ export function MarketplacePage() {
     pricePerTon,
   });
 
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const storedRule = window.localStorage.getItem(autoOffsetStorageKey);
-    if (!storedRule) {
-      setAutoOffsetRule(initialAutoOffsetRule);
-      return;
-    }
-
+  const loadBudgetAndRule = useCallback(async () => {
     try {
-      const parsedRule = JSON.parse(storedRule) as { enabled?: boolean; intensityThreshold?: number };
+      const [budgetResponse, ruleResponse] = await Promise.all([
+        marketplaceService.getBudget(),
+        marketplaceService.getAutoOffsetRule(),
+      ]);
+      setBudget(budgetResponse.budget);
+      setPendingBudgetRequests(budgetResponse.requests.filter((request) => request.status === "pending").length);
       setAutoOffsetRule({
-        enabled: Boolean(parsedRule.enabled),
-        intensityThreshold: Number.isFinite(Number(parsedRule.intensityThreshold))
-          ? Math.max(Number(parsedRule.intensityThreshold), 0)
-          : initialAutoOffsetRule.intensityThreshold,
+        ...initialAutoOffsetRule,
+        ...ruleResponse,
+        intensityThreshold: Number(ruleResponse.intensityThreshold ?? ruleResponse.carbonIntensityThreshold ?? 0.8),
+        carbonIntensityThreshold: Number(ruleResponse.carbonIntensityThreshold ?? ruleResponse.intensityThreshold ?? 0.8),
       });
-    } catch {
-      setAutoOffsetRule(initialAutoOffsetRule);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load marketplace budget");
     }
-  }, [autoOffsetStorageKey]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    window.localStorage.setItem(autoOffsetStorageKey, JSON.stringify(autoOffsetRule));
-  }, [autoOffsetRule, autoOffsetStorageKey]);
+  }, []);
 
   const loadProjects = useCallback(async () => {
     try {
@@ -397,6 +405,7 @@ export function MarketplacePage() {
 
   useEffect(() => {
     void loadProjects();
+    void loadBudgetAndRule();
     const unsubscribers = [
       socketService.on("projectCreated", () => {
         void loadProjects();
@@ -409,7 +418,7 @@ export function MarketplacePage() {
       }),
     ];
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
-  }, [loadProjects]);
+  }, [loadProjects, loadBudgetAndRule]);
 
   useEffect(() => {
     if (loading || projects.length > 0) {
@@ -499,18 +508,18 @@ export function MarketplacePage() {
   );
 
   const carbonBudgetUsd = useMemo(
-    () => Math.max(metrics.offsetSpendUsd + (liveInventoryValueUsd * 0.35), 25000),
-    [liveInventoryValueUsd, metrics.offsetSpendUsd],
+    () => Number(budget?.totalBudget || 0),
+    [budget],
   );
 
   const remainingBudgetUsd = useMemo(
-    () => Math.max(carbonBudgetUsd - metrics.offsetSpendUsd, 0),
-    [carbonBudgetUsd, metrics.offsetSpendUsd],
+    () => Math.max(Number(budget?.remainingBudget ?? (carbonBudgetUsd - metrics.offsetSpendUsd - pendingTransactionsUsd)), 0),
+    [budget, carbonBudgetUsd, metrics.offsetSpendUsd, pendingTransactionsUsd],
   );
 
   const availableBudgetUsd = useMemo(
-    () => Math.max(remainingBudgetUsd - pendingTransactionsUsd, 0),
-    [pendingTransactionsUsd, remainingBudgetUsd],
+    () => Math.max(remainingBudgetUsd, 0),
+    [remainingBudgetUsd],
   );
 
   const checkoutBlockedReason = useMemo(() => {
@@ -530,12 +539,36 @@ export function MarketplacePage() {
       return "Archived listings are retained for audit history and cannot be purchased.";
     }
 
+    if (selectedProject.status === "PAUSED" || selectedProject.status === "PENDING_REVIEW") {
+      return "This listing is not published for checkout.";
+    }
+
+    if (selectedProject.isDemo || selectedProject.isSample) {
+      return "Demo listing - not valid for real offset claims.";
+    }
+
+    if (!selectedProject.isRealInventory) {
+      return "This listing is not marked as real inventory.";
+    }
+
+    if (!(selectedProject.registryName || selectedProject.registry || selectedProject.verificationStandard) || !selectedProject.registryProjectId) {
+      return "Registry name and project ID are required before checkout.";
+    }
+
     if (getProjectAvailableInventory(selectedProject) <= 0) {
       return "Inventory is temporarily reserved by another checkout.";
     }
 
+    if (!budget?.isConfigured) {
+      return "Marketplace budget is not configured for this company.";
+    }
+
+    if (checkoutValidation.totalCost > availableBudgetUsd) {
+      return "Marketplace budget is insufficient for this checkout.";
+    }
+
     return "";
-  }, [selectedProject]);
+  }, [availableBudgetUsd, budget?.isConfigured, checkoutValidation.totalCost, selectedProject]);
 
   const closeProjectModal = () => {
     setShowProjectModal(false);
@@ -612,21 +645,13 @@ export function MarketplacePage() {
   const requestCustomCreditSourcing = () => {
     showToast({
       tone: "info",
-      title: "Custom sourcing request started",
-      description: "Our sourcing team has been notified to find credits aligned with your route requirements.",
+      title: "Inventory sourcing required",
+      description: "No published carbon credit inventory is available. Add or publish a verified listing from admin before checkout.",
     });
   };
 
   const emptyStateRecommendations = useMemo(() => {
-    if (recommendedProjects.length >= 2) {
-      return recommendedProjects.slice(0, 2);
-    }
-
-    const remaining = 2 - recommendedProjects.length;
-    return [
-      ...recommendedProjects,
-      ...FALLBACK_RECOMMENDATIONS.slice(0, remaining),
-    ];
+    return recommendedProjects.slice(0, 2);
   }, [recommendedProjects]);
 
   const requestBudgetIncrease = async () => {
@@ -643,15 +668,14 @@ export function MarketplacePage() {
         remainingBudgetUsd: Number(availableBudgetUsd.toFixed(2)),
         pendingTransactionsUsd: Number(pendingTransactionsUsd.toFixed(2)),
       });
+      await loadBudgetAndRule();
 
       showToast({
-        tone: response.emailDelivered ? "success" : "info",
-        title: response.emailDelivered
-          ? "Budget increase request sent"
-          : "Budget request logged",
+        tone: "success",
+        title: "Budget increase request recorded",
         description: response.emailDelivered
           ? `Notified ${response.recipientCount} admin recipient(s) for approval.`
-          : "SMTP is not configured, so the request was logged without email delivery.",
+          : "Email notification is not configured or was not delivered.",
       });
     } catch (err) {
       showToast({
@@ -661,6 +685,34 @@ export function MarketplacePage() {
       });
     } finally {
       setRequestingBudgetIncrease(false);
+    }
+  };
+
+  const saveAutoOffsetRule = async (nextRule: typeof initialAutoOffsetRule) => {
+    setAutoOffsetRule(nextRule);
+    try {
+      const savedRule = await marketplaceService.updateAutoOffsetRule({
+        ...nextRule,
+        carbonIntensityThreshold: nextRule.intensityThreshold,
+      });
+      setAutoOffsetRule({
+        ...initialAutoOffsetRule,
+        ...savedRule,
+        intensityThreshold: Number(savedRule.intensityThreshold ?? savedRule.carbonIntensityThreshold ?? nextRule.intensityThreshold),
+        carbonIntensityThreshold: Number(savedRule.carbonIntensityThreshold ?? savedRule.intensityThreshold ?? nextRule.intensityThreshold),
+      });
+      showToast({
+        tone: "success",
+        title: "Auto-offset rule saved",
+        description: "Auto-offset will not purchase real credits without approval unless explicitly enabled.",
+      });
+    } catch (err) {
+      showToast({
+        tone: "error",
+        title: "Could not save auto-offset rule",
+        description: err instanceof Error ? err.message : "Unknown error",
+      });
+      void loadBudgetAndRule();
     }
   };
 
@@ -852,11 +904,12 @@ export function MarketplacePage() {
 
       showToast({
         tone: "success",
-        title: "Carbon credits retired",
-        description: `${resolveTransactionReference(transaction)} is ready and the certificate is available.`,
+        title: "Marketplace transaction recorded",
+        description: `${resolveTransactionReference(transaction)} is ready for payment and registry verification review.`,
       });
 
       await loadProjects();
+      await loadBudgetAndRule();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Checkout failed";
       setCheckoutState("FAILED");
@@ -867,6 +920,7 @@ export function MarketplacePage() {
         description: message,
       });
       await loadProjects();
+      await loadBudgetAndRule();
     } finally {
       setSubmittingCheckout(false);
     }
@@ -944,7 +998,9 @@ export function MarketplacePage() {
         projectedMonthlySpendUsd={projectedMonthlyShipmentBurnUsd}
         autoOffsetRule={autoOffsetRule}
         requestingBudgetIncrease={requestingBudgetIncrease}
-        onAutoOffsetRuleChange={setAutoOffsetRule}
+        pendingBudgetRequests={pendingBudgetRequests}
+        budgetConfigured={Boolean(budget?.isConfigured)}
+        onAutoOffsetRuleChange={saveAutoOffsetRule}
         onRequestBudgetIncrease={requestBudgetIncrease}
       />
 
@@ -985,6 +1041,16 @@ export function MarketplacePage() {
       ) : null}
 
       <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr_1fr]">
+        <div className="xl:col-span-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm">
+          <div className="font-semibold text-foreground">Selected Listing Registry Metadata</div>
+          <div className="mt-2 grid gap-2 md:grid-cols-4 text-muted-foreground">
+            <span>Registry: {selectedProject?.registryName || selectedProject?.registry || selectedProject?.verificationStandard || "Not provided"}</span>
+            <span>Project ID: {selectedProject?.registryProjectId || "Not provided"}</span>
+            <span>Registry URL: {selectedProject?.registryUrl || "Not provided"}</span>
+            <span>Inventory: {selectedProject?.isDemo || selectedProject?.isSample ? "Demo/test only" : selectedProject?.isRealInventory ? "Real inventory" : "Not marked real"}</span>
+          </div>
+        </div>
+
         <CheckoutDetails
           companyName={checkoutForm.companyName}
           quantity={checkoutForm.quantity}
@@ -1080,9 +1146,11 @@ export function MarketplacePage() {
                 <tr>
                   <th className="px-6 py-3 font-medium">Company</th>
                   <th className="px-6 py-3 font-medium">Project</th>
-                  <th className="px-6 py-3 font-medium">Registry / Hash</th>
+                  <th className="px-6 py-3 font-medium">Registry / Reference</th>
                   <th className="px-6 py-3 font-medium">Shipment</th>
-                  <th className="px-6 py-3 font-medium">Status</th>
+                  <th className="px-6 py-3 font-medium">Lifecycle</th>
+                  <th className="px-6 py-3 font-medium">Payment</th>
+                  <th className="px-6 py-3 font-medium">Registry</th>
                   <th className="px-6 py-3 font-medium">Platform Fee</th>
                   <th className="px-6 py-3 font-medium">Total Cost</th>
                   <th className="px-6 py-3 font-medium">Certificate</th>
@@ -1090,7 +1158,7 @@ export function MarketplacePage() {
               </thead>
               <tbody className="divide-y divide-border">
                 {transactions.length === 0 ? (
-                  <tr><td colSpan={8} className="px-6 py-4 text-center text-muted-foreground">No checkout activity recorded yet.</td></tr>
+                  <tr><td colSpan={10} className="px-6 py-4 text-center text-muted-foreground">No checkout activity recorded yet.</td></tr>
                 ) : transactions.map((transaction) => (
                   <tr key={transaction.id} className="hover:bg-muted/50">
                     <td className="px-6 py-4">{transaction.companyName || "Company"}</td>
@@ -1104,7 +1172,9 @@ export function MarketplacePage() {
                         ? transaction.shipmentReferences.join(", ")
                         : transaction.shipmentReference || "Not linked"}
                     </td>
-                    <td className="px-6 py-4">{transaction.status}</td>
+                    <td className="px-6 py-4">{transaction.lifecycleStatus || transaction.status}</td>
+                    <td className="px-6 py-4">{transaction.paymentStatus || "pending"}</td>
+                    <td className="px-6 py-4">{transaction.registryRetirementStatus || "pending"}</td>
                     <td className="px-6 py-4">${(transaction.platformFeeUsd || 0).toLocaleString()}</td>
                     <td className="px-6 py-4">${transaction.totalCostUsd.toLocaleString()}</td>
                     <td className="px-6 py-4">
@@ -1159,12 +1229,12 @@ export function MarketplacePage() {
       <Modal
         open={showSuccessModal}
         onClose={() => setShowSuccessModal(false)}
-        title="Checkout Completed"
-        description="The transaction has been retired successfully and the PDF certificate is ready."
+        title="Marketplace Transaction Recorded"
+        description="The internal transaction record is ready. Payment settlement and registry retirement status are shown below."
       >
         <div className="space-y-4">
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-            <div className="font-semibold">Registry / Hash</div>
+            <div className="font-semibold">Registry / Reference</div>
             <div className="mt-1 break-all font-mono text-xs">{activeTransaction ? resolveTransactionReference(activeTransaction) : "-"}</div>
           </div>
           <div className="grid gap-3 text-sm">
@@ -1179,6 +1249,9 @@ export function MarketplacePage() {
                 : activeTransaction?.shipmentReference || "Not linked"}
             />
             <SuccessRow label="Payment Reference" value={activeTransaction?.paymentReference || "-"} />
+            <SuccessRow label="Payment Status" value={activeTransaction?.paymentStatus || "pending"} />
+            <SuccessRow label="Registry Retirement Status" value={activeTransaction?.registryRetirementStatus || "pending"} />
+            <SuccessRow label="Certificate Validity" value={activeTransaction?.isDemo ? "Demo Certificate — Not valid for real offset claims." : activeTransaction?.registryRetirementStatus === "manually_verified" ? "Registry retirement manually verified by admin." : "Internal transaction record only — no registry retirement completed."} />
           </div>
           <div className="flex flex-wrap gap-3">
             <Button onClick={() => downloadCertificate(activeTransaction)} disabled={!activeTransaction || activeTransaction.status !== "COMPLETED" || downloadingCertificate}>

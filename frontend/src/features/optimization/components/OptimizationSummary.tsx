@@ -40,14 +40,14 @@ export function OptimizationSummary({ summary }: OptimizationSummaryProps) {
   const summaryItems = [
     {
       title: "Shipments analyzed",
-      value: summary.shipmentsAnalyzed.toLocaleString(),
+      value: summary.totalShipmentsAnalyzed.toLocaleString(),
       detail: `${summary.routesAnalyzed} routes and ${summary.carriersAnalyzed} carriers`,
       icon: BarChart3,
     },
     {
       title: "Reduction opportunity",
-      value: formatEmissionTonnes(summary.potentialEmissionReduction),
-      detail: `${formatEmissionTonnes(summary.totalBaselineEmissions)} baseline emissions`,
+      value: formatEmissionTonnes(summary.potentialTco2eSavings),
+      detail: `${formatEmissionTonnes(summary.totalEmissionsAnalyzed)} analyzed emissions`,
       icon: Leaf,
     },
     {
@@ -60,7 +60,7 @@ export function OptimizationSummary({ summary }: OptimizationSummaryProps) {
     {
       title: "Supplier coverage",
       value: summary.suppliersAnalyzed.toLocaleString(),
-      detail: currencyFormatter.format(summary.totalBaselineCost),
+      detail: currencyFormatter.format(summary.totalCostAnalyzed),
       icon: Building2,
     },
   ];

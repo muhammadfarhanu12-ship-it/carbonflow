@@ -5,7 +5,8 @@ import {
   Database, 
   BarChart, 
   Settings, 
-  Leaf 
+  Leaf,
+  ShoppingBag
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -19,6 +20,7 @@ const navigation = [
   { name: 'User Management', href: '/users', icon: Users },
   { name: 'Carbon Data', href: '/carbon-data', icon: Database },
   { name: 'Analytics', href: '/analytics', icon: BarChart },
+  { name: 'Marketplace', href: '/marketplace', icon: ShoppingBag },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 

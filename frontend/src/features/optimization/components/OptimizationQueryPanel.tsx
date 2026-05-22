@@ -3,14 +3,20 @@ import { ArrowRightLeft, Building2, Loader2, Route, Sparkles } from "lucide-reac
 import { Card, CardContent } from "@/src/components/ui/card";
 import { Input } from "@/src/components/ui/input";
 import { Button } from "@/src/components/ui/button";
+import type { OptimizationAnalysisMode, OptimizationSummary } from "../types";
 
 type OptimizationQueryPanelProps = {
   inputRef: RefObject<HTMLInputElement | null>;
   inputValue: string;
   helperText: string;
   loading: boolean;
+  context: OptimizationSummary | null;
+  analysisMode?: OptimizationAnalysisMode;
+  generatedAt?: string;
+  filters: Record<string, string>;
   suggestedQueries: string[];
   onInputChange: (value: string) => void;
+  onFilterChange: (key: string, value: string) => void;
   onAnalyze: () => void;
   onSuggestedQuery: (query: string) => void;
 };
@@ -38,11 +44,22 @@ export function OptimizationQueryPanel({
   inputValue,
   helperText,
   loading,
+  context,
+  analysisMode,
+  generatedAt,
+  filters,
   suggestedQueries,
   onInputChange,
+  onFilterChange,
   onAnalyze,
   onSuggestedQuery,
 }: OptimizationQueryPanelProps) {
+  const modeLabel = analysisMode === "hybrid"
+    ? "Hybrid"
+    : analysisMode === "ai_assisted"
+      ? "AI-assisted"
+      : "Rule-based optimization";
+
   return (
     <Card className="overflow-hidden border-primary/20 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.18),_transparent_42%),linear-gradient(135deg,rgba(15,23,42,0.02),rgba(16,185,129,0.04))]">
       <CardContent className="p-0">
@@ -50,7 +67,7 @@ export function OptimizationQueryPanel({
           <div className="p-6 md:p-8">
             <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-background/80 px-3 py-1 text-xs font-semibold tracking-[0.18em] text-primary uppercase">
               <Sparkles className="h-3.5 w-3.5" />
-              AI Carbon Optimization
+              {modeLabel}
             </div>
 
             <div className="mt-5 max-w-3xl space-y-3">
@@ -84,6 +101,23 @@ export function OptimizationQueryPanel({
 
             <p className="mt-3 text-xs text-muted-foreground">{helperText}</p>
 
+            <div className="mt-5 grid gap-3 md:grid-cols-4">
+              {[
+                ["mode", "Mode"],
+                ["carrier", "Carrier"],
+                ["route", "Route/lane"],
+                ["supplier", "Supplier"],
+              ].map(([key, label]) => (
+                <Input
+                  key={key}
+                  value={filters[key] || ""}
+                  onChange={(event) => onFilterChange(key, event.target.value)}
+                  placeholder={label}
+                  className="h-10 border-border/70 bg-background/85 text-sm"
+                />
+              ))}
+            </div>
+
             <div className="mt-6 flex flex-wrap items-center gap-2">
               <span className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Suggested</span>
               {suggestedQueries.map((query) => (
@@ -101,7 +135,33 @@ export function OptimizationQueryPanel({
           </div>
 
           <div className="border-t border-border/60 bg-background/70 p-6 lg:border-t-0 lg:border-l">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Analysis coverage</p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Analysis coverage</p>
+              {generatedAt ? (
+                <span className="text-xs text-muted-foreground">{new Date(generatedAt).toLocaleString()}</span>
+              ) : null}
+            </div>
+
+            {context ? (
+              <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+                <div className="rounded-lg border border-border/70 bg-background/80 p-3">
+                  <p className="text-xs text-muted-foreground">Shipments</p>
+                  <p className="font-semibold text-foreground">{context.totalShipmentsAnalyzed.toLocaleString()}</p>
+                </div>
+                <div className="rounded-lg border border-border/70 bg-background/80 p-3">
+                  <p className="text-xs text-muted-foreground">Completeness</p>
+                  <p className="font-semibold text-foreground">{context.dataCompleteness.toFixed(0)}%</p>
+                </div>
+                <div className="rounded-lg border border-border/70 bg-background/80 p-3">
+                  <p className="text-xs text-muted-foreground">Ledger</p>
+                  <p className="font-semibold text-foreground">{context.ledgerRecordsAnalyzed.toLocaleString()}</p>
+                </div>
+                <div className="rounded-lg border border-border/70 bg-background/80 p-3">
+                  <p className="text-xs text-muted-foreground">Suppliers</p>
+                  <p className="font-semibold text-foreground">{context.suppliersAnalyzed.toLocaleString()}</p>
+                </div>
+              </div>
+            ) : null}
 
             <div className="mt-5 space-y-4">
               {coverageItems.map((item) => (

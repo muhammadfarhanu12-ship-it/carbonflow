@@ -151,7 +151,7 @@ async function seedDatabase() {
     headquarters: "New York, USA",
     carbonTargetYear: 2040,
     carbonPricePerTon: env.carbonPricePerTon,
-    apiKey: "cf_demo_key",
+    apiKey: null,
     planType: "ENTERPRISE",
     status: "ACTIVE",
   });
@@ -166,7 +166,7 @@ async function seedDatabase() {
       { name: "SAP S/4HANA", status: "CONNECTED", lastSync: "2 hours ago" },
       { name: "Manhattan Active TMS", status: "NOT_CONNECTED", lastSync: null },
     ],
-    apiKeys: [{ label: "Default API Key", key: "cf_demo_key", createdAt: new Date().toISOString() }],
+    apiKeys: [],
   });
 
   await User.create({

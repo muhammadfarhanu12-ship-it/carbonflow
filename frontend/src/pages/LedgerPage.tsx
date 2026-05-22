@@ -1003,6 +1003,8 @@ export function LedgerPage() {
           record={selectedRecord}
           suppliers={suppliers}
           canEdit={hasPermission(user, "emission:update") || ["OWNER", "ADMIN", "MANAGER", "DATA_ENTRY", "USER"].includes(normalizedRole)}
+          canRecalculate={hasPermission(user, "emission:recalculate") || ["OWNER", "ADMIN", "MANAGER"].includes(normalizedRole)}
+          canArchive={hasPermission(user, "emission:archive") || ["OWNER", "ADMIN", "MANAGER"].includes(normalizedRole)}
           onClose={() => setSelectedRecord(null)}
           onArchive={() => updateRecordStatus(selectedRecord.id, "archived")}
           onRecalculate={(reason) => recalculateRecord(selectedRecord.id, reason)}
@@ -1154,6 +1156,8 @@ function RecordDetailsModal({
   record,
   suppliers,
   canEdit,
+  canRecalculate,
+  canArchive,
   onClose,
   onArchive,
   onRecalculate,
@@ -1162,6 +1166,8 @@ function RecordDetailsModal({
   record: EmissionRecord;
   suppliers: Supplier[];
   canEdit: boolean;
+  canRecalculate: boolean;
+  canArchive: boolean;
   onClose: () => void;
   onArchive: () => void;
   onRecalculate: (reason?: string) => void;
@@ -1334,7 +1340,7 @@ function RecordDetailsModal({
             <div>Latest version/year: {[record.latestAvailableFactorVersion, record.latestAvailableFactorSourceYear].filter(Boolean).join(" / ") || "-"}</div>
           </div>
           {record.isStaleFactor ? <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">{record.staleFactorReason || "This record may use a stale factor."}</div> : null}
-          {record.canRecalculateWithLatestFactor ? (
+          {record.canRecalculateWithLatestFactor && canRecalculate ? (
             <div className="mt-3 flex flex-wrap gap-2">
               <Input className="max-w-md" value={recalculateReason} onChange={(event) => setRecalculateReason(event.target.value)} placeholder={lockedForReason ? "Reason required for approved/submitted records" : "Reason for recalculation"} />
               <Button type="button" variant="outline" onClick={() => onRecalculate(recalculateReason)}>Recalculate with latest factor</Button>
@@ -1404,8 +1410,8 @@ function RecordDetailsModal({
         ) : null}
         <div className="mt-4 flex justify-end gap-2">
           {canEdit ? <Button type="button" variant="outline" onClick={() => setEditMode(true)}>Edit</Button> : null}
-          <Button type="button" variant="outline" onClick={() => onRecalculate(recalculateReason)}>Recalculate</Button>
-          <Button type="button" variant="outline" onClick={onArchive}>Archive</Button>
+          {canRecalculate ? <Button type="button" variant="outline" onClick={() => onRecalculate(recalculateReason)}>Recalculate</Button> : null}
+          {canArchive ? <Button type="button" variant="outline" onClick={onArchive}>Archive</Button> : null}
           <Button type="button" onClick={onClose}>Done</Button>
         </div>
       </div>

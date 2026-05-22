@@ -30,6 +30,8 @@ export function normalizePagination(value: unknown, pageSize = DEFAULT_PAGINATIO
     pageSize: asNumber(value.pageSize, pageSize),
     total: asNumber(value.total, DEFAULT_PAGINATION.total),
     totalPages: asNumber(value.totalPages, DEFAULT_PAGINATION.totalPages),
+    hasNextPage: Boolean(value.hasNextPage),
+    hasPreviousPage: Boolean(value.hasPreviousPage),
   };
 }
 

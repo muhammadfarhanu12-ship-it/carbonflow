@@ -9,6 +9,7 @@ const UsersPage = lazy(async () => ({ default: (await import('./pages/users/User
 const CarbonDataPage = lazy(async () => ({ default: (await import('./pages/carbon/CarbonDataPage')).CarbonDataPage }));
 const AnalyticsPage = lazy(async () => ({ default: (await import('./pages/analytics/AnalyticsPage')).AnalyticsPage }));
 const SettingsPage = lazy(async () => ({ default: (await import('./pages/settings/SettingsPage')).SettingsPage }));
+const MarketplacePage = lazy(async () => ({ default: (await import('./pages/marketplace/MarketplacePage')).MarketplacePage }));
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { isAuthenticated, isLoading } = useAuth();
@@ -35,6 +36,7 @@ function AppRoutes() {
           <Route path="users" element={<UsersPage />} />
           <Route path="carbon-data" element={<CarbonDataPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
+          <Route path="marketplace" element={<MarketplacePage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

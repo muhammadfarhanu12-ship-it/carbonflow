@@ -47,9 +47,9 @@ export function MarketplaceEmptyState({
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg shadow-slate-300/40">
             <SearchX className="h-6 w-6" />
           </div>
-          <h3 className="mt-4 text-lg font-semibold text-foreground">No listings match these filters</h3>
+          <h3 className="mt-4 text-lg font-semibold text-foreground">No published carbon credit inventory is available</h3>
           <p className="mx-auto mt-2 max-w-2xl text-sm text-muted-foreground">
-            Try widening the search, remove a few constraints, or explore route-aligned recommendations below.
+            Add or publish a verified listing from admin before checkout. Demo/test credits are not valid for real offset claims.
           </p>
         </div>
 
@@ -81,6 +81,7 @@ export function MarketplaceEmptyState({
           </div>
         ) : null}
 
+        {recommendations.length > 0 ? (
         <div className="rounded-2xl border border-emerald-200/70 bg-[linear-gradient(135deg,rgba(236,253,245,0.92),rgba(255,255,255,0.95))] p-4">
           <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
             <Lightbulb className="h-4 w-4 text-emerald-700" />
@@ -99,13 +100,14 @@ export function MarketplaceEmptyState({
                   </div>
                 </div>
                 <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{project.registry || "Verified Registry"}</span>
+                  <span>{project.registry || "Registry not provided"}</span>
                   <span>Rating {Number(project.rating || 4.7).toFixed(1)}</span>
                 </div>
               </article>
             ))}
           </div>
         </div>
+        ) : null}
 
         <div className="flex flex-col gap-2 sm:flex-row sm:justify-center">
           <Button

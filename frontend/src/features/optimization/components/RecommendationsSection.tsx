@@ -1,15 +1,20 @@
-import { CircleAlert, Loader2, RefreshCw, SearchX } from "lucide-react";
+import { CircleAlert, Download, FileSpreadsheet, FileText, Loader2, RefreshCw, SearchX } from "lucide-react";
 import { Button } from "@/src/components/ui/button";
 import { Card, CardContent } from "@/src/components/ui/card";
 import { RecommendationCard } from "./RecommendationCard";
 import { OptimizationSummary } from "./OptimizationSummary";
-import type { OptimizationAnalysisResult } from "../types";
+import type { OptimizationAnalysisResult, OptimizationRun, OptimizationStatus } from "../types";
 
 type RecommendationsSectionProps = {
   loading: boolean;
   error: string | null;
   results: OptimizationAnalysisResult | null;
+  runs: OptimizationRun[];
+  exporting: boolean;
   onRetry: () => void;
+  onStatusChange: (id: string, status: OptimizationStatus) => void;
+  onExport: (runId: string, format: "PDF" | "CSV") => void;
+  onOpenRun: (runId: string) => void;
 };
 
 function RecommendationSkeleton() {
@@ -50,7 +55,12 @@ export function RecommendationsSection({
   loading,
   error,
   results,
+  runs,
+  exporting,
   onRetry,
+  onStatusChange,
+  onExport,
+  onOpenRun,
 }: RecommendationsSectionProps) {
   const hasRecommendations = Boolean(results?.recommendations.length);
   const hasResults = Boolean(results);
@@ -77,6 +87,29 @@ export function RecommendationsSection({
         ) : null}
       </div>
 
+      {results?.runId ? (
+        <Card className="border-border/70 bg-background/90 shadow-sm">
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Export latest optimization run</p>
+              <p className="text-xs text-muted-foreground">
+                Downloads use authenticated API requests and include data coverage, recommendations, assumptions, warnings, and limitations.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => onExport(results.runId!, "PDF")} disabled={exporting}>
+                {exporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileText className="mr-2 h-4 w-4" />}
+                PDF
+              </Button>
+              <Button variant="outline" onClick={() => onExport(results.runId!, "CSV")} disabled={exporting}>
+                {exporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
+                CSV
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {error ? (
         <Card className="border-destructive/30 bg-destructive/5">
           <CardContent className="flex flex-col gap-3 p-5 md:flex-row md:items-center md:justify-between">
@@ -96,7 +129,26 @@ export function RecommendationsSection({
         </Card>
       ) : null}
 
-      {hasResults && !loading ? <OptimizationSummary summary={results.summary} /> : null}
+      {hasResults && !loading ? (
+        <div className="space-y-4">
+          <OptimizationSummary summary={results.summary} />
+          <Card className="border-border/70 bg-background/90 shadow-sm">
+            <CardContent className="p-5">
+              <p className="text-sm font-semibold text-foreground">{results.answerSummary}</p>
+              {results.dataQualityIssues.length ? (
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  {results.dataQualityIssues.map((issue) => (
+                    <div key={issue.code} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                      <span className="font-semibold capitalize">{issue.severity}: </span>
+                      {issue.message}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
 
       {loading ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -107,7 +159,11 @@ export function RecommendationsSection({
       ) : hasRecommendations ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {results?.recommendations.map((recommendation) => (
-            <RecommendationCard key={recommendation.id} recommendation={recommendation} />
+            <RecommendationCard
+              key={recommendation.id || recommendation._id || recommendation.recommendationId}
+              recommendation={recommendation}
+              onStatusChange={onStatusChange}
+            />
           ))}
         </div>
       ) : hasResults ? (
@@ -116,7 +172,7 @@ export function RecommendationsSection({
             <SearchX className="h-10 w-10 text-muted-foreground" />
             <h3 className="mt-4 text-lg font-semibold text-foreground">No recommendations matched this query</h3>
             <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-              CarbonFlow reviewed {results.summary.shipmentsAnalyzed.toLocaleString()} shipments and {results.summary.suppliersAnalyzed.toLocaleString()} suppliers, but this prompt did not produce a confident action set. Try a route-specific or carrier-specific question instead.
+              CarbonFlow reviewed {results.summary.totalShipmentsAnalyzed.toLocaleString()} shipments and {results.summary.suppliersAnalyzed.toLocaleString()} suppliers, but this prompt did not produce a confident action set. No fake recommendations were generated.
             </p>
           </CardContent>
         </Card>
@@ -131,6 +187,52 @@ export function RecommendationsSection({
           </CardContent>
         </Card>
       )}
+
+      {runs.length ? (
+        <Card className="border-border/70 bg-background/90 shadow-sm">
+          <CardContent className="p-0">
+            <div className="border-b px-5 py-4">
+              <h3 className="font-semibold text-foreground">Recent Optimization Runs</h3>
+              <p className="text-sm text-muted-foreground">Open or export saved company-scoped analyses.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b bg-muted text-muted-foreground">
+                  <tr>
+                    <th className="px-5 py-3 font-medium">Question</th>
+                    <th className="px-5 py-3 font-medium">Mode</th>
+                    <th className="px-5 py-3 font-medium">Recommendations</th>
+                    <th className="px-5 py-3 font-medium">Created</th>
+                    <th className="px-5 py-3 text-right font-medium">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {runs.slice(0, 8).map((run) => {
+                    const runId = run.id || run._id || "";
+                    return (
+                      <tr key={runId}>
+                        <td className="max-w-md px-5 py-3 font-medium text-foreground">{run.question}</td>
+                        <td className="px-5 py-3">{run.analysisMode.replace("_", " ")}</td>
+                        <td className="px-5 py-3">{run.recommendationCount ?? run.recommendations?.length ?? 0}</td>
+                        <td className="px-5 py-3">{new Date(run.createdAt).toLocaleString()}</td>
+                        <td className="px-5 py-3 text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button variant="ghost" size="sm" onClick={() => onOpenRun(runId)}>Open</Button>
+                            <Button variant="ghost" size="sm" onClick={() => onExport(runId, "CSV")} disabled={exporting}>
+                              <Download className="mr-1.5 h-4 w-4" />
+                              CSV
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
     </section>
   );
 }

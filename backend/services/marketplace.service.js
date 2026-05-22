@@ -1,5 +1,4 @@
-const crypto = require("crypto");
-const { CarbonProject, Company, Transaction, User } = require("../models");
+const { CarbonProject, Company, Transaction, User, MarketplaceBudget, MarketplaceBudgetRequest, AutoOffsetRule, Shipment } = require("../models");
 const env = require("../config/env");
 const BaseService = require("./base.service");
 const AuditService = require("./audit.service");
@@ -9,6 +8,8 @@ const logger = require("../utils/logger");
 const cache = require("../utils/cache");
 const CheckoutLockService = require("./checkoutLock.service");
 const { OFFSET_PROJECT_STATUSES } = require("../constants/platform");
+const { getRegistryProvider } = require("./registry");
+const { getPaymentProvider } = require("./payment");
 
 const MANAGEABLE_MARKETPLACE_ROLES = new Set(["ADMIN", "SUPERADMIN", "MANAGER"]);
 const STATUS_CHANGE_ACTION = "offsetProject.status_changed";
@@ -18,7 +19,9 @@ const LEGACY_PROJECT_STATUS_ALIASES = {
 };
 const PROJECT_STATUS_FILTER_MAP = {
   DRAFT: ["DRAFT", "INACTIVE"],
+  PENDING_REVIEW: ["PENDING_REVIEW"],
   PUBLISHED: ["PUBLISHED", "ACTIVE"],
+  PAUSED: ["PAUSED"],
   ARCHIVED: ["ARCHIVED"],
   SOLD_OUT: ["SOLD_OUT"],
 };
@@ -26,6 +29,43 @@ const PUBLIC_MARKETPLACE_STATUSES = ["PUBLISHED"];
 const PUBLIC_MARKETPLACE_WITH_SOLD_OUT_STATUSES = ["PUBLISHED", "SOLD_OUT"];
 const BUDGET_ADMIN_ROLES = ["ADMIN", "SUPERADMIN"];
 const BUDGET_EMAIL_TIMEOUT_MS = 10000;
+const STATUS_AUDIT_ACTIONS = {
+  PUBLISHED: "marketplace_listing_published",
+  PAUSED: "marketplace_listing_paused",
+  ARCHIVED: "marketplace_listing_archived",
+};
+
+function normalizeEvidenceLinks(payload = {}, currentProject = null) {
+  return normalizePddDocuments(
+    pickDefined(payload.evidenceDocuments, payload.evidenceLinks, payload.evidence),
+    currentProject?.evidenceDocuments || [],
+  );
+}
+
+function assertPublishableProject(project) {
+  const isDemo = Boolean(project.isDemo || project.isSample);
+  const isRealInventory = Boolean(project.isRealInventory);
+  const evidenceDocuments = Array.isArray(project.evidenceDocuments) ? project.evidenceDocuments : [];
+  const totalQuantity = Number(project.totalQuantityTco2e || 0);
+  const availableCredits = Number(project.availableCredits || 0);
+  const reservedCredits = Number(project.reservedCredits || 0);
+  const retiredCredits = Number(project.retiredCredits || 0);
+
+  if (isDemo && isRealInventory) {
+    throw new ApiError(422, "Demo listings cannot be marked as real inventory.");
+  }
+
+  if (availableCredits + reservedCredits + retiredCredits > totalQuantity) {
+    throw new ApiError(422, "Available, reserved, and retired inventory cannot exceed total inventory.");
+  }
+
+  if (isRealInventory) {
+    const hasRegistryMetadata = Boolean((project.registryName || project.registry) && project.registryProjectId && project.registryUrl);
+    if (!hasRegistryMetadata || evidenceDocuments.length === 0) {
+      throw new ApiError(422, "Registry name, project ID, registry URL, and evidence metadata are required before publishing real inventory.");
+    }
+  }
+}
 
 function isTruthyQueryFlag(value) {
   return value === true || value === "true" || value === 1 || value === "1";
@@ -198,6 +238,44 @@ function serializeProject(project, lifecycle = null) {
   const reservedCredits = Math.max(Number(record.reservedCredits || 0), 0);
   const availableCredits = Math.max(Number(record.availableCredits || 0), 0);
   record.status = toCanonicalProjectStatus(record.status) || record.status;
+  record.projectName = record.name;
+  record.projectDescription = record.description || null;
+  record.projectType = record.type;
+  record.category = record.type;
+  record.methodology = record.methodology || null;
+  record.registryName = record.registryName || record.registry || record.verificationStandard || null;
+  record.registryProjectId = record.registryProjectId || null;
+  record.registryUrl = record.registryUrl || null;
+  record.creditUnit = "tCO2e";
+  record.totalQuantityTco2e = Number(record.totalQuantityTco2e || record.availableCredits + record.retiredCredits + reservedCredits || 0);
+  record.availableQuantityTco2e = availableCredits;
+  record.retiredQuantityTco2e = Number(record.retiredCredits || 0);
+  record.reservedQuantityTco2e = reservedCredits;
+  record.pricePerTco2e = Number(record.pricePerCreditUsd || 0);
+  record.currency = record.currency || "USD";
+  record.verificationStatus = record.verificationStatus || "UNVERIFIED";
+  record.isDemo = Boolean(record.isDemo);
+  record.isSample = Boolean(record.isSample);
+  record.isRealInventory = Boolean(record.isRealInventory);
+  record.evidenceDocuments = Array.isArray(record.evidenceDocuments) && record.evidenceDocuments.length > 0
+    ? record.evidenceDocuments
+    : record.pddDocuments || [];
+  record.notes = record.notes || null;
+  record.verificationDetails = {
+    ...(record.verificationDetails || {}),
+    registries: record.registryName || record.registry
+      ? [String(record.registryName || record.registry).toUpperCase().replace(/[.\s-]+/g, "_")]
+      : [],
+    verificationStatus: record.verificationStatus === "REGISTRY_VERIFIED" || record.verificationStatus === "THIRD_PARTY_VERIFIED"
+      ? "VERIFIED"
+      : record.verificationStatus === "REJECTED" || record.verificationStatus === "EXPIRED"
+        ? "ACTION_REQUIRED"
+        : "PENDING",
+    registryProjectId: record.registryProjectId || null,
+    methodology: record.methodology || null,
+    vintageYear: Number(record.vintageYear || 0),
+    sdgGoals: [],
+  };
   record.reservedCredits = reservedCredits;
   record.availableToPurchase = Math.max(availableCredits - reservedCredits, 0);
   if (lifecycle) {
@@ -243,11 +321,11 @@ function buildLifecycle(project, usage = {}) {
 function normalizeProjectPayload(payload = {}, currentProject = null) {
   const requestedRegistry = normalizeOptionalText(
     pickDefined(payload.registry, payload.verificationStandard, payload.certification),
-    currentProject?.registry || currentProject?.verificationStandard || currentProject?.certification || "Gold Standard",
-  ) || "Gold Standard";
+    currentProject?.registry || currentProject?.verificationStandard || currentProject?.certification || null,
+  );
   const certification = normalizeRequiredText(
     pickDefined(payload.certification, requestedRegistry),
-    currentProject?.certification || requestedRegistry || currentProject?.verificationStandard || "Gold Standard",
+    currentProject?.certification || requestedRegistry || currentProject?.verificationStandard || "Registry not provided",
     "certification",
   );
   const verificationStandard = normalizeOptionalText(
@@ -259,7 +337,7 @@ function normalizeProjectPayload(payload = {}, currentProject = null) {
     currentProject?.registry || requestedRegistry || verificationStandard || certification,
   ) || verificationStandard || certification;
   const availableCredits = ensureFiniteNumber(
-    pickDefined(payload.availableCredits, payload.totalSupply, currentProject?.availableCredits, 0),
+    pickDefined(payload.availableQuantityTco2e, payload.availableCredits, payload.totalSupply, currentProject?.availableCredits, 0),
     "availableCredits",
     { min: 0 },
   );
@@ -282,11 +360,26 @@ function normalizeProjectPayload(payload = {}, currentProject = null) {
     throw new ApiError(409, "availableCredits cannot be lower than reserved credits.");
   }
 
+  const evidenceDocuments = normalizeEvidenceLinks(payload, currentProject);
+  const isDemo = Boolean(payload.isDemo ?? currentProject?.isDemo ?? false);
+  const isSample = Boolean(payload.isSample ?? currentProject?.isSample ?? false);
+  const isRealInventory = Boolean(payload.isRealInventory ?? currentProject?.isRealInventory ?? false);
+
+  if ((isDemo || isSample) && isRealInventory) {
+    throw new ApiError(422, "Demo listings cannot be marked as real inventory.");
+  }
+
   return {
     name: normalizeRequiredText(pickDefined(payload.name, payload.projectName), currentProject?.name, "name"),
-    type: normalizeRequiredText(pickDefined(payload.type, payload.category), currentProject?.type, "type"),
+    type: normalizeRequiredText(pickDefined(payload.type, payload.projectType, payload.category), currentProject?.type, "type"),
     location: normalizeRequiredText(payload.location, currentProject?.location || "Marketplace", "location"),
-    description: normalizeOptionalText(payload.description, currentProject?.description || null),
+    description: normalizeOptionalText(pickDefined(payload.description, payload.projectDescription), currentProject?.description || null),
+    methodology: normalizeOptionalText(payload.methodology, currentProject?.methodology || null),
+    registryName: normalizeOptionalText(payload.registryName, currentProject?.registryName || registry || null),
+    registryProjectId: normalizeOptionalText(payload.registryProjectId, currentProject?.registryProjectId || null),
+    registryUrl: normalizeOptionalText(payload.registryUrl, currentProject?.registryUrl || null),
+    country: normalizeOptionalText(payload.country, currentProject?.country || null),
+    region: normalizeOptionalText(payload.region, currentProject?.region || null),
     coordinates: normalizeCoordinates(payload, currentProject),
     pddDocuments: normalizePddDocuments(payload.pddDocuments, currentProject?.pddDocuments || []),
     certification,
@@ -294,15 +387,46 @@ function normalizeProjectPayload(payload = {}, currentProject = null) {
     vintageYear: ensureFiniteNumber(payload.vintageYear ?? currentProject?.vintageYear ?? new Date().getUTCFullYear(), "vintageYear", { min: 2000 }),
     rating: ensureFiniteNumber(payload.rating ?? currentProject?.rating ?? 4.5, "rating", { min: 0, max: 5 }),
     pricePerCreditUsd: ensureFiniteNumber(
-      pickDefined(payload.pricePerCreditUsd, payload.pricePerTonUsd, payload.price, currentProject?.pricePerCreditUsd, 0),
+      pickDefined(payload.pricePerTco2e, payload.pricePerCreditUsd, payload.pricePerTonUsd, payload.price, currentProject?.pricePerCreditUsd, 0),
       "pricePerCreditUsd",
       { min: 0 },
     ),
     availableCredits,
+    totalQuantityTco2e: ensureFiniteNumber(
+      pickDefined(payload.totalQuantityTco2e, payload.totalSupply, currentProject?.totalQuantityTco2e, availableCredits + retiredCredits + reservedCredits),
+      "totalQuantityTco2e",
+      { min: availableCredits + reservedCredits + retiredCredits },
+    ),
     reservedCredits,
     retiredCredits,
     verificationStandard,
+    verificationStatus: normalizeOptionalText(payload.verificationStatus, currentProject?.verificationStatus || "UNVERIFIED") || "UNVERIFIED",
+    isDemo,
+    isSample,
+    isRealInventory,
+    evidenceDocuments,
+    currency: normalizeOptionalText(payload.currency, currentProject?.currency || "USD") || "USD",
+    notes: normalizeOptionalText(payload.notes, currentProject?.notes || null),
     status: shouldAutoMarkSoldOut ? "SOLD_OUT" : requestedStatus,
+  };
+}
+
+function serializeBudget(budget, spend = {}) {
+  const totalBudget = Number(budget?.totalBudget || 0);
+  const settledSpend = Number(spend.settledSpend || 0);
+  const pendingSpend = Number(spend.pendingSpend || 0);
+  return {
+    id: budget?.id || budget?._id || null,
+    companyId: budget?.companyId || null,
+    totalBudget,
+    settledSpend,
+    pendingSpend,
+    remainingBudget: Math.max(totalBudget - settledSpend - pendingSpend, 0),
+    currency: budget?.currency || "USD",
+    monthlyBudget: budget?.monthlyBudget ?? null,
+    approvalRequiredThreshold: budget?.approvalRequiredThreshold ?? null,
+    updatedAt: budget?.updatedAt || null,
+    isConfigured: Boolean(budget),
   };
 }
 
@@ -434,7 +558,7 @@ class MarketplaceService extends BaseService {
       userId: actor?.id || null,
       userEmail: actor?.email || null,
       ipAddress: details.ipAddress || null,
-      action: STATUS_CHANGE_ACTION,
+        action: STATUS_AUDIT_ACTIONS[nextCanonicalStatus] || STATUS_CHANGE_ACTION,
       entityType: "OffsetProject",
       entityId: project.id,
       details: {
@@ -466,6 +590,18 @@ class MarketplaceService extends BaseService {
 
     const previousStatus = currentStatus;
     project.status = normalizedStatus;
+    if (normalizedStatus === "PUBLISHED") {
+      assertPublishableProject(project);
+    }
+    project.updatedBy = actor?.id || null;
+    if (normalizedStatus === "PUBLISHED") {
+      project.publishedBy = actor?.id || null;
+      project.publishedAt = new Date();
+    }
+    if (normalizedStatus === "ARCHIVED") {
+      project.archivedBy = actor?.id || null;
+      project.archivedAt = new Date();
+    }
     await project.save();
     this.removeDashboardCache(project.companyId);
     await this.logStatusTransition(project, previousStatus, normalizedStatus, actor, details);
@@ -554,6 +690,81 @@ class MarketplaceService extends BaseService {
     });
   }
 
+  static async adjustInventory(id, companyId, payload = {}, actor = null, details = {}) {
+    const project = await this.getProjectOrFail(id, companyId);
+    const reason = normalizeRequiredText(payload.reason, null, "reason");
+    const previous = {
+      totalQuantityTco2e: Number(project.totalQuantityTco2e || 0),
+      availableCredits: Number(project.availableCredits || 0),
+      reservedCredits: Number(project.reservedCredits || 0),
+      retiredCredits: Number(project.retiredCredits || 0),
+      status: toCanonicalProjectStatus(project.status) || project.status,
+    };
+
+    const totalQuantityTco2e = normalizeOptionalNumber(
+      payload.totalQuantityTco2e,
+      project.totalQuantityTco2e,
+      "totalQuantityTco2e",
+      { min: 0 },
+    );
+    const availableCredits = normalizeOptionalNumber(
+      payload.availableQuantityTco2e ?? payload.availableCredits,
+      project.availableCredits,
+      "availableQuantityTco2e",
+      { min: 0 },
+    );
+    const reservedCredits = normalizeOptionalNumber(
+      payload.reservedQuantityTco2e ?? payload.reservedCredits,
+      project.reservedCredits,
+      "reservedQuantityTco2e",
+      { min: 0 },
+    );
+    const retiredCredits = normalizeOptionalNumber(
+      payload.retiredQuantityTco2e ?? payload.retiredCredits,
+      project.retiredCredits,
+      "retiredQuantityTco2e",
+      { min: 0 },
+    );
+
+    if (availableCredits + reservedCredits + retiredCredits > totalQuantityTco2e) {
+      throw new ApiError(422, "Available, reserved, and retired inventory cannot exceed total inventory.");
+    }
+
+    project.totalQuantityTco2e = totalQuantityTco2e;
+    project.availableCredits = availableCredits;
+    project.reservedCredits = reservedCredits;
+    project.retiredCredits = retiredCredits;
+    project.updatedBy = actor?.id || null;
+
+    if (availableCredits === 0 && (toCanonicalProjectStatus(project.status) || project.status) === "PUBLISHED") {
+      project.status = "SOLD_OUT";
+    }
+
+    await project.save();
+    this.removeDashboardCache(companyId);
+    await AuditService.log({
+      companyId,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      ipAddress: details.ipAddress || null,
+      action: "marketplace_inventory_adjusted",
+      entityType: "OffsetProject",
+      entityId: project.id,
+      oldValue: previous,
+      newValue: {
+        totalQuantityTco2e,
+        availableCredits,
+        reservedCredits,
+        retiredCredits,
+        status: toCanonicalProjectStatus(project.status) || project.status,
+      },
+      details: { reason },
+    });
+
+    const reloaded = await project.reload();
+    return serializeProject(reloaded, buildLifecycle(reloaded, await this.getLifecycleUsage(reloaded.id, companyId)));
+  }
+
   static async list(query = {}, companyId, actor = null) {
     await CheckoutLockService.releaseExpiredLocks({
       companyId,
@@ -633,6 +844,487 @@ class MarketplaceService extends BaseService {
     };
   }
 
+  static async getById(id, companyId, actor = null) {
+    const includeAllStatuses = canManageMarketplace(actor);
+    const filter = { _id: id, companyId };
+
+    if (!includeAllStatuses) {
+      filter.status = { $in: PUBLIC_MARKETPLACE_WITH_SOLD_OUT_STATUSES };
+    }
+
+    const project = await CarbonProject.findOne(filter);
+    if (!project) {
+      throw new ApiError(404, "Marketplace listing not found.");
+    }
+
+    return serializeProject(project, buildLifecycle(project, await this.getLifecycleUsage(project.id, companyId)));
+  }
+
+  static async calculateBudgetSpend(companyId) {
+    const [settled, pending] = await Promise.all([
+      Transaction.aggregate([
+        { $match: { companyId, status: "COMPLETED" } },
+        { $group: { _id: null, total: { $sum: "$totalCostUsd" } } },
+      ]),
+      Transaction.aggregate([
+        { $match: { companyId, status: { $in: ["PENDING", "RESERVED"] } } },
+        { $group: { _id: null, total: { $sum: "$totalCostUsd" } } },
+      ]),
+    ]);
+
+    return {
+      settledSpend: roundMoney(settled[0]?.total || 0),
+      pendingSpend: roundMoney(pending[0]?.total || 0),
+    };
+  }
+
+  static async getBudget(companyId) {
+    const [budget, spend, requests] = await Promise.all([
+      MarketplaceBudget.findOne({ companyId }).lean(),
+      this.calculateBudgetSpend(companyId),
+      MarketplaceBudgetRequest.find({ companyId }).sort({ createdAt: -1 }).limit(10).lean(),
+    ]);
+
+    return {
+      budget: serializeBudget(budget, spend),
+      requests: requests.map((request) => ({
+        id: request._id || request.id,
+        companyId: request.companyId,
+        requestedAmount: Number(request.requestedAmount || 0),
+        currentBudget: Number(request.currentBudget || 0),
+        reason: request.reason || null,
+        status: String(request.status || "PENDING").toLowerCase(),
+        requestedBy: request.requestedBy || null,
+        reviewedBy: request.reviewedBy || null,
+        reviewedAt: request.reviewedAt || null,
+        createdAt: request.createdAt,
+      })),
+    };
+  }
+
+  static async getBudgetRequest(id, companyId) {
+    const request = await MarketplaceBudgetRequest.findOne({ _id: id, companyId }).lean();
+    if (!request) {
+      throw new ApiError(404, "Budget request not found.");
+    }
+    return {
+      id: request._id || request.id,
+      companyId: request.companyId,
+      requestedAmount: Number(request.requestedAmount || 0),
+      currentBudget: Number(request.currentBudget || 0),
+      reason: request.reason || null,
+      reviewReason: request.reviewReason || null,
+      status: String(request.status || "PENDING").toLowerCase(),
+      requestedBy: request.requestedBy || null,
+      reviewedBy: request.reviewedBy || null,
+      reviewedAt: request.reviewedAt || null,
+      createdAt: request.createdAt,
+    };
+  }
+
+  static async approveBudgetRequest(id, companyId, actor = null, payload = {}, details = {}) {
+    if (!BUDGET_ADMIN_ROLES.includes(String(actor?.role || "").toUpperCase())) {
+      throw new ApiError(403, "Only owners and admins can approve budget requests.");
+    }
+
+    const request = await MarketplaceBudgetRequest.findOne({ _id: id, companyId });
+    if (!request) {
+      throw new ApiError(404, "Budget request not found.");
+    }
+    if (request.status !== "PENDING") {
+      throw new ApiError(409, "Only pending budget requests can be approved.");
+    }
+    if (request.requestedBy && actor?.id && String(request.requestedBy) === String(actor.id) && String(actor.role || "").toUpperCase() !== "SUPERADMIN") {
+      throw new ApiError(403, "Requester cannot approve their own budget request.");
+    }
+
+    const previousBudget = await MarketplaceBudget.findOne({ companyId }).lean();
+    const budget = await MarketplaceBudget.findOneAndUpdate(
+      { companyId },
+      {
+        $set: {
+          totalBudget: Number(request.requestedAmount || 0),
+          updatedBy: actor?.id || null,
+        },
+        $setOnInsert: {
+          companyId,
+          currency: "USD",
+          createdBy: actor?.id || null,
+        },
+      },
+      { new: true, upsert: true },
+    );
+    request.status = "APPROVED";
+    request.reviewedBy = actor?.id || null;
+    request.reviewedAt = new Date();
+    request.reviewReason = normalizeOptionalText(payload.reason, null);
+    await request.save();
+
+    await AuditService.log({
+      companyId,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      ipAddress: details.ipAddress || null,
+      action: "budget_increase_approved",
+      entityType: "MarketplaceBudgetRequest",
+      entityId: request.id,
+      oldValue: previousBudget,
+      newValue: budget.toJSON ? budget.toJSON() : budget,
+    });
+
+    return this.getBudgetRequest(request.id, companyId);
+  }
+
+  static async rejectBudgetRequest(id, companyId, actor = null, payload = {}, details = {}) {
+    if (!BUDGET_ADMIN_ROLES.includes(String(actor?.role || "").toUpperCase())) {
+      throw new ApiError(403, "Only owners and admins can reject budget requests.");
+    }
+    const request = await MarketplaceBudgetRequest.findOne({ _id: id, companyId });
+    if (!request) {
+      throw new ApiError(404, "Budget request not found.");
+    }
+    if (request.status !== "PENDING") {
+      throw new ApiError(409, "Only pending budget requests can be rejected.");
+    }
+    request.status = "REJECTED";
+    request.reviewedBy = actor?.id || null;
+    request.reviewedAt = new Date();
+    request.reviewReason = normalizeOptionalText(payload.reason, null) || "Rejected by administrator.";
+    await request.save();
+    await AuditService.log({
+      companyId,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      ipAddress: details.ipAddress || null,
+      action: "budget_increase_rejected",
+      entityType: "MarketplaceBudgetRequest",
+      entityId: request.id,
+      details: { reason: request.reviewReason },
+    });
+    return this.getBudgetRequest(request.id, companyId);
+  }
+
+  static async cancelBudgetRequest(id, companyId, actor = null, details = {}) {
+    const request = await MarketplaceBudgetRequest.findOne({ _id: id, companyId });
+    if (!request) {
+      throw new ApiError(404, "Budget request not found.");
+    }
+    const isRequester = request.requestedBy && actor?.id && String(request.requestedBy) === String(actor.id);
+    const isAdmin = BUDGET_ADMIN_ROLES.includes(String(actor?.role || "").toUpperCase());
+    if (!isRequester && !isAdmin) {
+      throw new ApiError(403, "Only the requester or an admin can cancel this budget request.");
+    }
+    if (request.status !== "PENDING") {
+      throw new ApiError(409, "Only pending budget requests can be cancelled.");
+    }
+    request.status = "CANCELLED";
+    request.reviewedBy = actor?.id || null;
+    request.reviewedAt = new Date();
+    await request.save();
+    await AuditService.log({
+      companyId,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      ipAddress: details.ipAddress || null,
+      action: "budget_increase_cancelled",
+      entityType: "MarketplaceBudgetRequest",
+      entityId: request.id,
+    });
+    return this.getBudgetRequest(request.id, companyId);
+  }
+
+  static async getTransactionOrFail(id, companyId) {
+    const transaction = await Transaction.findOne({ _id: id, companyId });
+    if (!transaction) {
+      throw new ApiError(404, "Marketplace transaction not found.");
+    }
+    return transaction;
+  }
+
+  static async getRetirementStatus(id, companyId) {
+    const transaction = await this.getTransactionOrFail(id, companyId);
+    return {
+      transactionId: transaction.id,
+      registryProvider: transaction.registryProvider || getRegistryProvider().name,
+      registryRetirementStatus: transaction.registryRetirementStatus || "pending",
+      registryRetirementId: transaction.registryRetirementId || null,
+      registryRetirementUrl: transaction.registryRetirementUrl || null,
+      registryRetiredAt: transaction.registryRetiredAt || null,
+      registryError: transaction.registryError || null,
+    };
+  }
+
+  static async submitRetirement(id, companyId, actor = null, details = {}) {
+    const transaction = await this.getTransactionOrFail(id, companyId);
+    const provider = getRegistryProvider();
+    const result = await provider.submitRetirement(transaction);
+    transaction.registryProvider = result.provider || provider.name;
+    transaction.registryRetirementStatus = result.status || "manual_verification_required";
+    transaction.registryRetirementId = result.retirementId || null;
+    transaction.registryRetirementUrl = result.retirementUrl || null;
+    transaction.registryRetiredAt = result.retiredAt || null;
+    transaction.registryResponseSnapshot = result.responseSnapshot || {};
+    transaction.registryError = result.error || null;
+    transaction.lifecycleStatus = transaction.registryRetirementStatus === "retired" ? "completed" : "pending_registry_retirement";
+    await transaction.save();
+    await AuditService.log({
+      companyId,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      ipAddress: details.ipAddress || null,
+      action: "marketplace_retirement_submitted",
+      entityType: "CarbonCreditTransaction",
+      entityId: transaction.id,
+      details: { provider: provider.name, status: transaction.registryRetirementStatus },
+    });
+    return this.getRetirementStatus(id, companyId);
+  }
+
+  static async manualRetirement(id, companyId, payload = {}, actor = null, details = {}) {
+    const transaction = await this.getTransactionOrFail(id, companyId);
+    if (transaction.isDemo) {
+      throw new ApiError(422, "Demo transactions cannot be marked as real registry retirements.");
+    }
+    const retirementId = normalizeRequiredText(payload.registryRetirementId, null, "registryRetirementId");
+    const evidenceReferences = Array.isArray(payload.evidenceReferences) ? payload.evidenceReferences : [];
+    if (evidenceReferences.length === 0 && !normalizeOptionalText(payload.registryRetirementUrl, null)) {
+      throw new ApiError(422, "Manual retirement requires evidence reference or registry URL.");
+    }
+    transaction.registryProvider = "manual";
+    transaction.registryRetirementStatus = "manually_verified";
+    transaction.registryRetirementId = retirementId;
+    transaction.registryRetirementUrl = normalizeOptionalText(payload.registryRetirementUrl, null);
+    transaction.registryRetiredAt = payload.registryRetiredAt ? new Date(payload.registryRetiredAt) : new Date();
+    transaction.registryResponseSnapshot = { manual: true, status: "manually_verified" };
+    transaction.registryError = null;
+    transaction.isRealRetirement = true;
+    transaction.lifecycleStatus = transaction.paymentStatus === "paid" || transaction.paymentStatus === "not_required"
+      ? "completed"
+      : "pending_payment";
+    transaction.verifierUserId = actor?.id || null;
+    transaction.verifierName = actor?.name || null;
+    transaction.verifierEmail = actor?.email || null;
+    transaction.verificationNotes = normalizeOptionalText(payload.verificationNotes, null);
+    transaction.evidenceReferences = evidenceReferences;
+    await transaction.save();
+    await AuditService.log({
+      companyId,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      ipAddress: details.ipAddress || null,
+      action: "marketplace_manual_retirement_verified",
+      entityType: "CarbonCreditTransaction",
+      entityId: transaction.id,
+      details: {
+        registryRetirementId: retirementId,
+        evidenceCount: evidenceReferences.length,
+      },
+    });
+    return this.getRetirementStatus(id, companyId);
+  }
+
+  static async getPaymentStatus(id, companyId) {
+    const transaction = await this.getTransactionOrFail(id, companyId);
+    return {
+      transactionId: transaction.id,
+      paymentProvider: transaction.paymentProvider || getPaymentProvider().name,
+      paymentStatus: transaction.paymentStatus || "pending",
+      paymentReference: transaction.paymentReference || null,
+      invoiceNumber: transaction.invoiceNumber || null,
+      invoiceUrl: transaction.invoiceUrl || null,
+      paidAt: transaction.paidAt || null,
+      settledAt: transaction.settledAt || null,
+      settlementNotes: transaction.settlementNotes || null,
+    };
+  }
+
+  static async createInvoice(id, companyId, actor = null, details = {}) {
+    const transaction = await this.getTransactionOrFail(id, companyId);
+    const provider = getPaymentProvider();
+    const invoice = await provider.createInvoice(transaction);
+    transaction.paymentProvider = invoice.provider || provider.name;
+    transaction.paymentStatus = invoice.status || "pending";
+    transaction.invoiceNumber = invoice.invoiceNumber || transaction.invoiceNumber || null;
+    transaction.invoiceUrl = invoice.invoiceUrl || transaction.invoiceUrl || null;
+    transaction.paymentReference = invoice.paymentReference || transaction.paymentReference || null;
+    transaction.lifecycleStatus = "pending_payment";
+    await transaction.save();
+    await AuditService.log({
+      companyId,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      ipAddress: details.ipAddress || null,
+      action: "marketplace_invoice_created",
+      entityType: "CarbonCreditTransaction",
+      entityId: transaction.id,
+      details: { provider: provider.name, invoiceNumber: transaction.invoiceNumber },
+    });
+    return this.getPaymentStatus(id, companyId);
+  }
+
+  static async markPaid(id, companyId, payload = {}, actor = null, details = {}) {
+    const transaction = await this.getTransactionOrFail(id, companyId);
+    const reference = normalizeRequiredText(payload.paymentReference || transaction.paymentReference, null, "paymentReference");
+    transaction.paymentProvider = transaction.paymentProvider || getPaymentProvider().name;
+    transaction.paymentStatus = "paid";
+    transaction.paymentReference = reference;
+    transaction.paidAt = payload.paidAt ? new Date(payload.paidAt) : new Date();
+    transaction.settledAt = payload.settledAt ? new Date(payload.settledAt) : transaction.paidAt;
+    transaction.settlementNotes = normalizeOptionalText(payload.settlementNotes || payload.reason, null);
+    transaction.lifecycleStatus = ["retired", "manually_verified", "not_required"].includes(transaction.registryRetirementStatus)
+      ? "completed"
+      : "pending_registry_retirement";
+    await transaction.save();
+    await AuditService.log({
+      companyId,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      ipAddress: details.ipAddress || null,
+      action: "marketplace_payment_marked_paid",
+      entityType: "CarbonCreditTransaction",
+      entityId: transaction.id,
+      details: { paymentReference: reference },
+    });
+    return this.getPaymentStatus(id, companyId);
+  }
+
+  static async refund(id, companyId, payload = {}, actor = null, details = {}) {
+    const transaction = await this.getTransactionOrFail(id, companyId);
+    transaction.paymentStatus = "refunded";
+    transaction.lifecycleStatus = "refunded";
+    transaction.settlementNotes = normalizeOptionalText(payload.reason, null) || transaction.settlementNotes;
+    await transaction.save();
+    await AuditService.log({
+      companyId,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      ipAddress: details.ipAddress || null,
+      action: "marketplace_payment_refunded",
+      entityType: "CarbonCreditTransaction",
+      entityId: transaction.id,
+      details: { reason: transaction.settlementNotes },
+    });
+    return this.getPaymentStatus(id, companyId);
+  }
+
+  static async markPaymentFailed(id, companyId, payload = {}, actor = null, details = {}) {
+    const transaction = await this.getTransactionOrFail(id, companyId);
+    const reason = normalizeRequiredText(payload.reason || payload.settlementNotes, null, "reason");
+    transaction.paymentStatus = "failed";
+    transaction.lifecycleStatus = "failed";
+    transaction.settlementNotes = reason;
+    await transaction.save();
+    await AuditService.log({
+      companyId,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      ipAddress: details.ipAddress || null,
+      action: "marketplace_payment_failed",
+      entityType: "CarbonCreditTransaction",
+      entityId: transaction.id,
+      details: { reason },
+    });
+    return this.getPaymentStatus(id, companyId);
+  }
+
+  static async cancelPayment(id, companyId, payload = {}, actor = null, details = {}) {
+    const transaction = await this.getTransactionOrFail(id, companyId);
+    const reason = normalizeRequiredText(payload.reason || payload.settlementNotes, null, "reason");
+    transaction.paymentStatus = "cancelled";
+    transaction.lifecycleStatus = "cancelled";
+    transaction.settlementNotes = reason;
+    await transaction.save();
+    await AuditService.log({
+      companyId,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      ipAddress: details.ipAddress || null,
+      action: "marketplace_payment_cancelled",
+      entityType: "CarbonCreditTransaction",
+      entityId: transaction.id,
+      details: { reason },
+    });
+    return this.getPaymentStatus(id, companyId);
+  }
+
+  static async getOperationalReview(companyId) {
+    const [transactions, budgetRequests, listings] = await Promise.all([
+      Transaction.find({ companyId }).sort({ createdAt: -1 }).limit(100).lean(),
+      MarketplaceBudgetRequest.find({ companyId, status: "PENDING" }).sort({ createdAt: -1 }).lean(),
+      CarbonProject.find({ companyId }).sort({ updatedAt: -1 }).limit(200).lean(),
+    ]);
+    const pendingPayment = transactions.filter((tx) => ["pending", "invoice_sent"].includes(tx.paymentStatus));
+    const pendingRegistry = transactions.filter((tx) => ["pending", "submitted", "manual_verification_required"].includes(tx.registryRetirementStatus));
+    const failedTransactions = transactions.filter((tx) => tx.status === "FAILED" || tx.lifecycleStatus === "failed" || tx.registryRetirementStatus === "failed");
+    const missingRegistry = listings.filter((listing) => listing.status === "PUBLISHED" && (!listing.registryProjectId || !(listing.registryName || listing.registry)));
+    const lowInventory = listings.filter((listing) => Number(listing.availableCredits || 0) > 0 && Number(listing.availableCredits || 0) <= 10);
+    const soldOut = listings.filter((listing) => listing.status === "SOLD_OUT" || Number(listing.availableCredits || 0) === 0);
+    return {
+      cards: {
+        pendingBudgetApprovals: budgetRequests.length,
+        pendingPaymentVerification: pendingPayment.length,
+        pendingRegistryRetirements: pendingRegistry.length,
+        failedTransactions: failedTransactions.length,
+        lowInventoryListings: lowInventory.length,
+        soldOutListings: soldOut.length,
+        listingsMissingRegistryMetadata: missingRegistry.length,
+        demoListings: listings.filter((listing) => listing.isDemo || listing.isSample).length,
+        realInventoryListings: listings.filter((listing) => listing.isRealInventory && !listing.isDemo && !listing.isSample).length,
+      },
+      queues: {
+        budgetRequests,
+        pendingPayment,
+        pendingRegistry,
+        failedTransactions,
+        missingRegistry,
+        lowInventory,
+        soldOut,
+      },
+    };
+  }
+
+  static async updateBudget(payload = {}, companyId, actor = null, details = {}) {
+    if (!BUDGET_ADMIN_ROLES.includes(String(actor?.role || "").toUpperCase())) {
+      throw new ApiError(403, "Only owners and admins can manage marketplace budgets.");
+    }
+
+    const totalBudget = ensureFiniteNumber(payload.totalBudget ?? payload.totalBudgetUsd, "totalBudget", { min: 0 });
+    const monthlyBudget = normalizeOptionalNumber(payload.monthlyBudget, null, "monthlyBudget", { min: 0 });
+    const approvalRequiredThreshold = normalizeOptionalNumber(payload.approvalRequiredThreshold, null, "approvalRequiredThreshold", { min: 0 });
+    const previous = await MarketplaceBudget.findOne({ companyId }).lean();
+    const budget = await MarketplaceBudget.findOneAndUpdate(
+      { companyId },
+      {
+        $set: {
+          totalBudget,
+          monthlyBudget,
+          approvalRequiredThreshold,
+          currency: normalizeOptionalText(payload.currency, "USD") || "USD",
+          updatedBy: actor?.id || null,
+        },
+        $setOnInsert: {
+          companyId,
+          createdBy: actor?.id || null,
+        },
+      },
+      { new: true, upsert: true },
+    );
+
+    await AuditService.log({
+      companyId,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      ipAddress: details.ipAddress || null,
+      action: "marketplace_budget_updated",
+      entityType: "MarketplaceBudget",
+      entityId: budget.id,
+      oldValue: previous || null,
+      newValue: budget.toJSON ? budget.toJSON() : budget,
+    });
+
+    return (await this.getBudget(companyId)).budget;
+  }
+
   static async resolveBudgetRequestRecipients(companyId) {
     const adminUsers = await User.find({
       companyId,
@@ -663,8 +1355,9 @@ class MarketplaceService extends BaseService {
   }
 
   static async requestBudgetIncrease(payload = {}, companyId, actor = null, details = {}) {
-    const currentBudgetUsd = roundMoney(ensureFiniteNumber(payload.currentBudgetUsd, "currentBudgetUsd", { min: 0 }));
-    const requestedBudgetUsd = roundMoney(ensureFiniteNumber(payload.requestedBudgetUsd, "requestedBudgetUsd", { min: 0 }));
+    const budgetState = await this.getBudget(companyId);
+    const currentBudgetUsd = roundMoney(ensureFiniteNumber(payload.currentBudgetUsd ?? budgetState.budget.totalBudget, "currentBudgetUsd", { min: 0 }));
+    const requestedBudgetUsd = roundMoney(ensureFiniteNumber(payload.requestedBudgetUsd ?? payload.requestedAmount, "requestedBudgetUsd", { min: 0 }));
     const remainingBudgetUsd = roundMoney(ensureFiniteNumber(payload.remainingBudgetUsd ?? 0, "remainingBudgetUsd", { min: 0 }));
     const pendingTransactionsUsd = roundMoney(ensureFiniteNumber(payload.pendingTransactionsUsd ?? 0, "pendingTransactionsUsd", { min: 0 }));
 
@@ -707,14 +1400,23 @@ class MarketplaceService extends BaseService {
       });
     }
 
+    const request = await MarketplaceBudgetRequest.create({
+      companyId,
+      requestedAmount: requestedBudgetUsd,
+      currentBudget: currentBudgetUsd,
+      reason,
+      status: "PENDING",
+      requestedBy: actor?.id || null,
+    });
+
     await AuditService.log({
       companyId,
       userId: actor?.id || null,
       userEmail: actor?.email || null,
       ipAddress: details.ipAddress || null,
-      action: "offsetBudget.increase_requested",
+      action: "budget_increase_requested",
       entityType: "MarketplaceBudget",
-      entityId: String(companyId || ""),
+      entityId: request.id,
       details: {
         currentBudgetUsd,
         requestedBudgetUsd,
@@ -734,13 +1436,125 @@ class MarketplaceService extends BaseService {
       pendingTransactionsUsd,
       recipientCount: recipients.length,
       emailDelivered: Boolean(delivery?.messageId),
+      requestId: request.id,
     };
   }
 
-  static async create(payload, companyId, actor = null) {
-    const project = await CarbonProject.create({
-      ...normalizeProjectPayload(payload),
+  static async getAutoOffsetRule(companyId) {
+    const rule = await AutoOffsetRule.findOne({ companyId }).lean();
+    return {
+      enabled: Boolean(rule?.enabled),
+      carbonIntensityThreshold: Number(rule?.carbonIntensityThreshold ?? 0.8),
+      intensityThreshold: Number(rule?.carbonIntensityThreshold ?? 0.8),
+      maxSpendPerMonth: rule?.maxSpendPerMonth ?? null,
+      preferredProjectTypes: rule?.preferredProjectTypes || [],
+      preferredRegistries: rule?.preferredRegistries || [],
+      requireApproval: rule?.requireApproval !== false,
+      lastEvaluatedAt: rule?.lastEvaluatedAt || null,
+      lastEvaluation: rule?.lastEvaluation || {},
+      isConfigured: Boolean(rule),
+    };
+  }
+
+  static async updateAutoOffsetRule(payload = {}, companyId, actor = null, details = {}) {
+    const previous = await AutoOffsetRule.findOne({ companyId }).lean();
+    const carbonIntensityThreshold = ensureFiniteNumber(
+      payload.carbonIntensityThreshold ?? payload.intensityThreshold ?? 0.8,
+      "carbonIntensityThreshold",
+      { min: 0 },
+    );
+    const rule = await AutoOffsetRule.findOneAndUpdate(
+      { companyId },
+      {
+        $set: {
+          enabled: Boolean(payload.enabled),
+          carbonIntensityThreshold,
+          maxSpendPerMonth: normalizeOptionalNumber(payload.maxSpendPerMonth, null, "maxSpendPerMonth", { min: 0 }),
+          preferredProjectTypes: Array.isArray(payload.preferredProjectTypes) ? payload.preferredProjectTypes.map(String) : [],
+          preferredRegistries: Array.isArray(payload.preferredRegistries) ? payload.preferredRegistries.map(String) : [],
+          requireApproval: payload.requireApproval !== false,
+          updatedBy: actor?.id || null,
+        },
+        $setOnInsert: {
+          companyId,
+          createdBy: actor?.id || null,
+        },
+      },
+      { new: true, upsert: true },
+    );
+
+    await AuditService.log({
       companyId,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      ipAddress: details.ipAddress || null,
+      action: "auto_offset_rule_updated",
+      entityType: "AutoOffsetRule",
+      entityId: rule.id,
+      oldValue: previous || null,
+      newValue: rule.toJSON ? rule.toJSON() : rule,
+    });
+
+    return this.getAutoOffsetRule(companyId);
+  }
+
+  static async evaluateAutoOffsetRule(companyId, actor = null, details = {}) {
+    const rule = await AutoOffsetRule.findOne({ companyId });
+    const threshold = Number(rule?.carbonIntensityThreshold ?? 0.8);
+    const eligibleShipments = rule?.enabled
+      ? await Shipment.find({
+        companyId,
+        emissionsTonnes: { $gt: threshold },
+        status: { $in: ["PLANNED", "IN_TRANSIT", "DELAYED"] },
+      }).limit(50).lean()
+      : [];
+    const eligibleListings = rule?.enabled
+      ? await CarbonProject.countDocuments({
+        companyId,
+        status: { $in: PROJECT_STATUS_FILTER_MAP.PUBLISHED },
+        availableCredits: { $gt: 0 },
+        isDemo: { $ne: true },
+        isRealInventory: true,
+      })
+      : 0;
+    const evaluation = {
+      eligibleShipmentsCount: eligibleShipments.length,
+      eligibleListingsCount: eligibleListings,
+      estimatedBudgetImpact: 0,
+      warning: rule?.enabled && eligibleListings === 0 ? "No eligible real published listing exists for auto-offset." : null,
+      evaluatedAt: new Date(),
+    };
+
+    if (rule) {
+      rule.lastEvaluatedAt = evaluation.evaluatedAt;
+      rule.lastEvaluation = evaluation;
+      await rule.save();
+    }
+
+    await AuditService.log({
+      companyId,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      ipAddress: details.ipAddress || null,
+      action: "auto_offset_evaluated",
+      entityType: "AutoOffsetRule",
+      entityId: rule?.id || String(companyId),
+      details: evaluation,
+    });
+
+    return evaluation;
+  }
+
+  static async create(payload, companyId, actor = null) {
+    const normalizedPayload = normalizeProjectPayload(payload);
+    if ((toCanonicalProjectStatus(normalizedPayload.status) || normalizedPayload.status) === "PUBLISHED") {
+      assertPublishableProject(normalizedPayload);
+    }
+    const project = await CarbonProject.create({
+      ...normalizedPayload,
+      companyId,
+      createdBy: actor?.id || null,
+      updatedBy: actor?.id || null,
     });
 
     this.removeDashboardCache(companyId);
@@ -748,7 +1562,7 @@ class MarketplaceService extends BaseService {
       companyId,
       userId: actor?.id || null,
       userEmail: actor?.email || null,
-      action: "offsetProject.created",
+      action: "marketplace_listing_created",
       entityType: "OffsetProject",
       entityId: project.id,
       details: {
@@ -788,7 +1602,20 @@ class MarketplaceService extends BaseService {
     }
 
     const previousStatus = currentStatus;
-    await project.update(normalizeProjectPayload(payload, project));
+    Object.assign(project, normalizeProjectPayload(payload, project));
+    if ((toCanonicalProjectStatus(project.status) || project.status) === "PUBLISHED") {
+      assertPublishableProject(project);
+    }
+    project.updatedBy = actor?.id || null;
+    if ((toCanonicalProjectStatus(project.status) || project.status) === "PUBLISHED" && previousStatus !== "PUBLISHED") {
+      project.publishedBy = actor?.id || null;
+      project.publishedAt = new Date();
+    }
+    if ((toCanonicalProjectStatus(project.status) || project.status) === "ARCHIVED" && previousStatus !== "ARCHIVED") {
+      project.archivedBy = actor?.id || null;
+      project.archivedAt = new Date();
+    }
+    await project.save();
     this.removeDashboardCache(companyId);
 
     if (previousStatus !== (toCanonicalProjectStatus(project.status) || project.status)) {
@@ -802,7 +1629,7 @@ class MarketplaceService extends BaseService {
       companyId,
       userId: actor?.id || null,
       userEmail: actor?.email || null,
-      action: "offsetProject.updated",
+      action: "marketplace_listing_updated",
       entityType: "OffsetProject",
       entityId: id,
       details: {
@@ -943,8 +1770,10 @@ class MarketplaceService extends BaseService {
       userId: actor?.id || null,
       type: "PURCHASE",
       status: "COMPLETED",
-      registryRecordId: `REG-${new Date().getUTCFullYear()}-${id.replace(/-/g, "").slice(0, 10).toUpperCase()}`,
-      blockchainHash: `0x${crypto.createHash("sha256").update(`${id}:${requestedCredits}:${companyId}`).digest("hex").slice(0, 40)}`,
+      registryProjectId: updatedProject.registryProjectId || null,
+      registryRecordId: null,
+      registryRetirementId: null,
+      blockchainHash: null,
       credits: requestedCredits,
       price: pricePerTonUsd,
       pricePerTonUsd,
@@ -954,9 +1783,15 @@ class MarketplaceService extends BaseService {
       totalCostUsd,
       totalCost: totalCostUsd,
       retiredAt: new Date(),
+      certificateId: null,
+      isDemo: Boolean(updatedProject.isDemo || updatedProject.isSample),
+      isRealRetirement: false,
       metadata: {
         projectName: updatedProject.name,
         verificationStandard: updatedProject.verificationStandard || updatedProject.certification,
+        disclaimer: updatedProject.isDemo || updatedProject.isSample
+          ? "Demo transaction - not valid for real offset claims."
+          : "CarbonFlow transaction record only. No registry retirement reference was provided.",
       },
     });
 
@@ -977,7 +1812,7 @@ class MarketplaceService extends BaseService {
       companyId,
       userId: actor?.id || null,
       userEmail: actor?.email || null,
-      action: "offsetProject.purchased",
+      action: "marketplace_checkout_completed",
       entityType: "OffsetProject",
       entityId: id,
       details: {

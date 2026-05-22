@@ -1,6 +1,7 @@
 const express = require("express");
 const asyncHandler = require("../middleware/asyncHandler");
 const { authenticate } = require("../middleware/auth");
+const { requirePermission } = require("../middlewares/rbac");
 const validateSchema = require("../middlewares/validateSchema");
 const { checkoutRateLimiter } = require("../middlewares/rateLimiter");
 const controller = require("../controllers/checkout.controller");
@@ -12,7 +13,7 @@ const {
 const router = express.Router();
 
 router.use(authenticate);
-router.post("/start", checkoutRateLimiter, validateSchema(startCheckoutSchema), asyncHandler(controller.start));
-router.post("/complete", checkoutRateLimiter, validateSchema(completeCheckoutSchema), asyncHandler(controller.complete));
+router.post("/start", requirePermission("marketplace:checkout"), checkoutRateLimiter, validateSchema(startCheckoutSchema), asyncHandler(controller.start));
+router.post("/complete", requirePermission("marketplace:checkout"), checkoutRateLimiter, validateSchema(completeCheckoutSchema), asyncHandler(controller.complete));
 
 module.exports = router;

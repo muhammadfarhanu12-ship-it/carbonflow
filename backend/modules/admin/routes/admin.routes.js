@@ -63,4 +63,18 @@ router.delete("/reports/:id", requireAdminPermission("report:generate"), require
 router.get("/settings", catchAsync(adminController.getSettings));
 router.put("/settings", requireAdminRole("superadmin"), settingsValidator, validateRequest, catchAsync(adminController.updateSettings));
 
+router.get("/marketplace", requireAdminPermission("marketplace:view"), catchAsync(adminController.getMarketplaceOverview));
+router.post("/marketplace/listings", requireAdminPermission("marketplace:manage"), catchAsync(adminController.createMarketplaceListing));
+router.patch("/marketplace/listings/:id", requireAdminPermission("marketplace:manage"), catchAsync(adminController.updateMarketplaceListing));
+router.patch("/marketplace/listings/:id/inventory", requireAdminPermission("marketplace:manage"), catchAsync(adminController.adjustMarketplaceInventory));
+router.patch("/marketplace/budget/requests/:requestId/approve", requireAdminPermission("marketplace:budget:manage"), catchAsync(adminController.approveMarketplaceBudgetRequest));
+router.patch("/marketplace/budget/requests/:requestId/reject", requireAdminPermission("marketplace:budget:manage"), catchAsync(adminController.rejectMarketplaceBudgetRequest));
+router.post("/marketplace/transactions/:id/submit-retirement", requireAdminPermission("marketplace:manage"), catchAsync(adminController.submitMarketplaceRetirement));
+router.patch("/marketplace/transactions/:id/manual-retirement", requireAdminPermission("marketplace:manage"), catchAsync(adminController.manualMarketplaceRetirement));
+router.post("/marketplace/transactions/:id/create-invoice", requireAdminPermission("marketplace:manage"), catchAsync(adminController.createMarketplaceInvoice));
+router.patch("/marketplace/transactions/:id/mark-paid", requireAdminPermission("marketplace:manage"), catchAsync(adminController.markMarketplacePaid));
+router.patch("/marketplace/transactions/:id/mark-failed", requireAdminPermission("marketplace:manage"), catchAsync(adminController.markMarketplacePaymentFailed));
+router.patch("/marketplace/transactions/:id/cancel", requireAdminPermission("marketplace:manage"), catchAsync(adminController.cancelMarketplacePayment));
+router.patch("/marketplace/transactions/:id/refund", requireAdminPermission("marketplace:manage"), catchAsync(adminController.refundMarketplacePayment));
+
 module.exports = router;

@@ -34,13 +34,13 @@ const STATE_META: Record<CheckoutFlowState, {
   },
   PROCESSING: {
     title: "Reserving inventory",
-    description: "CarbonFlow is locking inventory, finalizing the transaction, and preparing the retirement certificate.",
+    description: "CarbonFlow is locking inventory, recording the transaction, and preparing the certificate wording.",
     icon: LoaderCircle,
     className: "border-sky-200 bg-sky-50 text-sky-700",
   },
   SUCCESS: {
-    title: "Checkout completed",
-    description: "The retirement is complete and the certificate is available for secure download.",
+    title: "Transaction recorded",
+    description: "The internal transaction record is complete. Payment and registry retirement may still require manual verification.",
     icon: CheckCircle2,
     className: "border-emerald-200 bg-emerald-50 text-emerald-700",
   },
@@ -61,7 +61,10 @@ export function TransactionStatus({
 }: TransactionStatusProps) {
   const meta = STATE_META[state];
   const Icon = meta.icon;
-  const registryOrHash = transaction?.registryRecordId || transaction?.blockchainHash || "Pending assignment";
+  const registryReference = transaction?.registryRetirementId
+    || transaction?.registryRecordId
+    || transaction?.serialNumber
+    || "Pending assignment";
   const linkedShipmentLabel = transaction?.shipmentReferences && transaction.shipmentReferences.length > 0
     ? transaction.shipmentReferences.join(", ")
     : transaction?.shipmentReference || "No linked shipment";
@@ -86,19 +89,22 @@ export function TransactionStatus({
           <div className="grid gap-3 text-sm">
             <StatusRow label="Transaction ID" value={transaction.id} />
             <StatusRow label="Status" value={transaction.status} />
-            <StatusRow label="Registry / Hash" value={registryOrHash} />
+            <StatusRow label="Lifecycle" value={transaction.lifecycleStatus || transaction.status} />
+            <StatusRow label="Payment Status" value={transaction.paymentStatus || "pending"} />
+            <StatusRow label="Registry Retirement Status" value={transaction.registryRetirementStatus || "pending"} />
+            <StatusRow label="Registry / Reference" value={registryReference} />
             <StatusRow label="Serial Number" value={transaction.serialNumber || "Pending assignment"} />
             <StatusRow label="Payment Reference" value={transaction.paymentReference || "Pending"} />
             <StatusRow label="Linked Shipment(s)" value={linkedShipmentLabel} />
             <StatusRow label="Lock Expires" value={transaction.lockExpiresAt ? new Date(transaction.lockExpiresAt).toLocaleString() : "Not reserved"} />
-            <StatusRow label="Certificate" value={transaction.certificateMetadata?.certificateUrl ? "Ready" : "Not available"} />
+            <StatusRow label="Certificate Validity" value={transaction.isDemo ? "Demo Certificate — Not valid for real offset claims." : transaction.registryRetirementStatus === "manually_verified" ? "Registry retirement manually verified by admin." : "Internal transaction record only — no registry retirement completed."} />
           </div>
         ) : null}
 
         <div className="rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
           <div className="flex items-start gap-3">
             <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-            <p>Completed checkouts receive a mock registry reference or blockchain hash for audit-friendly traceability.</p>
+            <p>Demo certificates are not valid for real offset claims. Real retirement references appear only when provided by a configured registry integration.</p>
           </div>
         </div>
 

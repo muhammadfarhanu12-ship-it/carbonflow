@@ -1,5 +1,14 @@
-import { apiClient } from "./apiClient";
-import type { CarbonCreditTransaction, CarbonProject, MarketplaceOverview, MarketplaceListingStatus } from "@/src/types/platform";
+import { apiClient, axiosClient } from "./apiClient";
+import type {
+  AutoOffsetRule,
+  CarbonCreditTransaction,
+  CarbonProject,
+  CreditCheckoutPayload,
+  MarketplaceBudget,
+  MarketplaceBudgetRequest,
+  MarketplaceOverview,
+  MarketplaceListingStatus,
+} from "@/src/types/platform";
 import { asArray, asNumber, isRecord, normalizePaginatedResponse } from "@/src/utils/apiResponse";
 
 export interface ProjectPayload {
@@ -7,6 +16,12 @@ export interface ProjectPayload {
   type: string;
   location: string;
   description?: string | null;
+  methodology?: string | null;
+  registryName?: string | null;
+  registryProjectId?: string | null;
+  registryUrl?: string | null;
+  country?: string | null;
+  region?: string | null;
   coordinates?: {
     latitude: number | null;
     longitude: number | null;
@@ -22,10 +37,17 @@ export interface ProjectPayload {
   rating: number;
   pricePerCreditUsd: number;
   pricePerTonUsd?: number;
+  currency?: string;
+  totalQuantityTco2e?: number;
   availableCredits: number;
   reservedCredits?: number;
   retiredCredits?: number;
   status?: MarketplaceListingStatus;
+  verificationStatus?: CarbonProject["verificationStatus"];
+  isDemo?: boolean;
+  isSample?: boolean;
+  isRealInventory?: boolean;
+  evidenceDocuments?: ProjectPayload["pddDocuments"];
 }
 
 export interface ProjectManagementPayload {
@@ -56,10 +78,11 @@ export interface MarketplaceProjectActionResult {
 }
 
 export interface BudgetIncreaseRequestPayload {
-  currentBudgetUsd: number;
-  requestedBudgetUsd: number;
-  remainingBudgetUsd: number;
-  pendingTransactionsUsd: number;
+  currentBudgetUsd?: number;
+  requestedBudgetUsd?: number;
+  requestedAmount?: number;
+  remainingBudgetUsd?: number;
+  pendingTransactionsUsd?: number;
   companyName?: string;
   reason?: string;
 }
@@ -91,6 +114,10 @@ function normalizeMarketplaceOverview(payload: unknown): MarketplaceOverview {
 
 export const marketplaceService = {
   getProjects: async (params = "") => normalizeMarketplaceOverview(await apiClient.get<unknown>(`/marketplace${params}`)),
+  getListing: (id: string) => apiClient.get<CarbonProject>(`/marketplace/listings/${id}`),
+  getBudget: () => apiClient.get<{ budget: MarketplaceBudget; requests: MarketplaceBudgetRequest[] }>("/marketplace/budget"),
+  updateBudget: (data: Partial<MarketplaceBudget>) => apiClient.patch<MarketplaceBudget>("/marketplace/budget", data),
+  getBudgetRequests: () => apiClient.get<MarketplaceBudgetRequest[]>("/marketplace/budget/requests"),
   createProject: (data: ProjectPayload) => apiClient.post<CarbonProject>("/marketplace", data),
   createManagedProject: (data: ProjectManagementPayload) => apiClient.post<CarbonProject>("/marketplace/projects", data),
   updateProject: (id: string, data: Partial<ProjectPayload>) => apiClient.put<CarbonProject>(`/marketplace/${id}`, data),
@@ -99,6 +126,17 @@ export const marketplaceService = {
   archiveProject: (id: string) => apiClient.patch<CarbonProject>(`/marketplace/${id}/archive`),
   deactivateProject: (id: string) => apiClient.patch<CarbonProject>(`/marketplace/${id}/deactivate`),
   markProjectSoldOut: (id: string) => apiClient.patch<CarbonProject>(`/marketplace/${id}/sold-out`),
+  getAutoOffsetRule: () => apiClient.get<AutoOffsetRule>("/marketplace/auto-offset-rule"),
+  updateAutoOffsetRule: (data: Partial<AutoOffsetRule>) => apiClient.patch<AutoOffsetRule>("/marketplace/auto-offset-rule", data),
+  evaluateAutoOffsetRule: () => apiClient.post<Record<string, unknown>>("/marketplace/auto-offset-rule/evaluate"),
+  checkout: async (payload: CreditCheckoutPayload) => {
+    const response = await axiosClient.post("/marketplace/checkout", payload, {
+      headers: payload.idempotencyKey
+        ? { "Idempotency-Key": payload.idempotencyKey }
+        : undefined,
+    });
+    return response.data?.data as CarbonCreditTransaction;
+  },
   requestBudgetIncrease: (data: BudgetIncreaseRequestPayload) => (
     apiClient.post<BudgetIncreaseRequestResult>("/marketplace/budget/request-increase", data)
   ),

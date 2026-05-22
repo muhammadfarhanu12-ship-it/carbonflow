@@ -24,7 +24,7 @@ class AuthService {
         headquarters: payload.headquarters || "Remote",
         carbonTargetYear: 2040,
         carbonPricePerTon: env.carbonPricePerTon,
-        apiKey: `cf_${Date.now()}`,
+        apiKey: null,
         status: "TRIAL",
       });
 
@@ -37,7 +37,7 @@ class AuthService {
         carbonPricePerTon: Number(company.carbonPricePerTon),
         netZeroTargetYear: company.carbonTargetYear,
         integrations: [],
-        apiKeys: [{ label: "Default API Key", key: company.apiKey, createdAt: new Date().toISOString() }],
+        apiKeys: [],
       });
     }
 

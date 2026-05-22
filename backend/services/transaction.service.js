@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const ApiError = require("../utils/ApiError");
 const logger = require("../utils/logger");
 const cache = require("../utils/cache");
-const { CarbonProject, Shipment, Transaction } = require("../models");
+const { CarbonProject, Shipment, Transaction, MarketplaceBudget } = require("../models");
 const AuditService = require("./audit.service");
 const CertificateService = require("./certificate.service");
 const DocumentStorageService = require("./documentStorage.service");
@@ -11,6 +11,8 @@ const CheckoutLockService = require("./checkoutLock.service");
 const MarketplaceService = require("./marketplace.service");
 const LedgerService = require("./ledger.service");
 const { CARBON_CREDITS_CONFIG } = require("../config/carbonCredits");
+const { getPaymentProvider } = require("./payment");
+const { getRegistryProvider } = require("./registry");
 
 const CHECKOUT_PLATFORM_FEE_RATE = 0.02;
 const ACTIVE_SHIPMENT_STATUSES = new Set(["PLANNED", "IN_TRANSIT", "DELAYED"]);
@@ -53,16 +55,6 @@ function buildPaymentReference() {
   return `PAY-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 }
 
-function buildRegistryRecordId() {
-  const year = new Date().getUTCFullYear();
-  const shortCode = crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase();
-  return `REG-${year}-${shortCode}`;
-}
-
-function buildMockBlockchainHash(transactionId, paymentReference) {
-  return `0x${crypto.createHash("sha256").update(`${transactionId}:${paymentReference}`).digest("hex").slice(0, 40)}`;
-}
-
 function isProjectPurchasableStatus(status) {
   const normalized = String(status || "").trim().toUpperCase();
   return normalized === "PUBLISHED" || normalized === "ACTIVE";
@@ -87,9 +79,13 @@ function normalizeProjectDetails(project) {
 
   return {
     projectName: project.name,
-    registry: project.registry || project.verificationStandard || project.certification || "Gold Standard",
+    registry: project.registryName || project.registry || project.verificationStandard || project.certification || null,
+    registryProjectId: project.registryProjectId || null,
     vintageYear: Number(project.vintageYear || new Date().getUTCFullYear()),
     pricePerTon: Number(project.pricePerCreditUsd || project.pricePerTonUsd || 0),
+    verificationStatus: project.verificationStatus || "UNVERIFIED",
+    isDemo: Boolean(project.isDemo || project.isSample),
+    isRealInventory: Boolean(project.isRealInventory),
   };
 }
 
@@ -119,7 +115,14 @@ function buildTransactionView(transaction) {
     companyName: record.companyName,
     projectName: record.projectName,
     registry: record.registry,
+    registryProjectId: record.registryProjectId || null,
     registryRecordId: record.registryRecordId || null,
+    registryRetirementId: record.registryRetirementId || null,
+    registryProvider: record.registryProvider || "disabled",
+    registryRetirementStatus: record.registryRetirementStatus || "pending",
+    registryRetirementUrl: record.registryRetirementUrl || null,
+    registryRetiredAt: record.registryRetiredAt || null,
+    registryError: record.registryError || null,
     blockchainHash: record.blockchainHash || null,
     vintageYear: Number(record.vintageYear || 0),
     shipmentId: record.shipmentId || null,
@@ -150,8 +153,19 @@ function buildTransactionView(transaction) {
     totalCostUsd: Number(record.totalCostUsd ?? record.total ?? 0),
     tCO2eRetired: Number(record.tCO2eRetired ?? record.quantity ?? record.credits ?? 0),
     serialNumber: record.serialNumber || null,
+    certificateId: record.certificateId || record.certificate?.certificateId || null,
+    isDemo: Boolean(record.isDemo),
+    isRealRetirement: Boolean(record.isRealRetirement),
     status: record.status,
     paymentReference: record.paymentReference,
+    paymentProvider: record.paymentProvider || "disabled",
+    paymentStatus: record.paymentStatus || "pending",
+    invoiceNumber: record.invoiceNumber || null,
+    invoiceUrl: record.invoiceUrl || null,
+    paidAt: record.paidAt || null,
+    settledAt: record.settledAt || null,
+    settlementNotes: record.settlementNotes || null,
+    lifecycleStatus: record.lifecycleStatus || null,
     createdAt: record.createdAt,
     completedAt: record.completedAt || null,
     retiredAt: record.retiredAt || record.completedAt || null,
@@ -163,6 +177,29 @@ function buildTransactionView(transaction) {
     certificateMetadata,
     certificate: record.certificate || null,
     metadata: record.metadata || {},
+  };
+}
+
+async function getBudgetState(companyId) {
+  const budget = await MarketplaceBudget.findOne({ companyId }).lean();
+  const [settled, pending] = await Promise.all([
+    Transaction.aggregate([
+      { $match: { companyId, status: "COMPLETED" } },
+      { $group: { _id: null, total: { $sum: "$totalCostUsd" } } },
+    ]),
+    Transaction.aggregate([
+      { $match: { companyId, status: { $in: ["PENDING", "RESERVED"] } } },
+      { $group: { _id: null, total: { $sum: "$totalCostUsd" } } },
+    ]),
+  ]);
+  const totalBudget = Number(budget?.totalBudget || 0);
+  const settledSpend = Number(settled[0]?.total || 0);
+  const pendingSpend = Number(pending[0]?.total || 0);
+
+  return {
+    isConfigured: Boolean(budget),
+    totalBudget,
+    remainingBudget: Math.max(totalBudget - settledSpend - pendingSpend, 0),
   };
 }
 
@@ -315,7 +352,7 @@ class TransactionService {
         userId: actor?.id || updated.userId || null,
         userEmail: actor?.email || updated.metadata?.initiatedBy?.userEmail || null,
         ipAddress,
-        action: "credits.checkout.failed",
+        action: "marketplace_checkout_failed",
         entityType: "CarbonCreditTransaction",
         entityId: updated.id,
         details: {
@@ -429,7 +466,26 @@ class TransactionService {
       throw new ApiError(409, "This listing is not currently available for purchase.");
     }
 
+    if (projectDetails.isDemo && payload.checkoutMode === "real") {
+      throw new ApiError(422, "Demo credits cannot be checked out as real retirements.");
+    }
+
+    if (!projectDetails.isDemo && !projectDetails.isRealInventory) {
+      throw new ApiError(422, "This listing is not marked as real inventory and cannot be used for real offset claims.");
+    }
+
+    if (!projectDetails.isDemo && (!projectDetails.registry || !projectDetails.registryProjectId)) {
+      throw new ApiError(422, "Registry name and project ID are required for real checkout.");
+    }
+
     const totals = calculateCheckoutTotals(quantity, pricePerTon);
+    const budgetState = await getBudgetState(companyId);
+    if (!budgetState.isConfigured) {
+      throw new ApiError(409, "Marketplace budget is not configured for this company.");
+    }
+    if (totals.totalCostUsd > budgetState.remainingBudget) {
+      throw new ApiError(409, "Marketplace budget is insufficient for this checkout.");
+    }
     const transactionId = crypto.randomUUID();
     const lockExpiresAt = CheckoutLockService.buildExpiryDate();
     const transactionInput = {
@@ -442,6 +498,7 @@ class TransactionService {
       projectId: payload.projectId,
       projectName: projectDetails.projectName,
       registry: projectDetails.registry,
+      registryProjectId: projectDetails.registryProjectId,
       vintageYear: projectDetails.vintageYear,
       shipmentId: primaryLinkedShipment?.id || null,
       shipmentIds: linkedShipments.map((shipment) => shipment.id),
@@ -462,6 +519,14 @@ class TransactionService {
       tCO2eRetired: quantity,
       serialNumber: null,
       paymentReference: buildPaymentReference(),
+      paymentProvider: getPaymentProvider().name,
+      paymentStatus: getPaymentProvider().name === "disabled" ? "pending" : "pending",
+      registryProvider: getRegistryProvider().name,
+      registryRetirementStatus: projectDetails.isDemo ? "not_required" : "pending",
+      lifecycleStatus: "pending_payment",
+      certificateId: null,
+      isDemo: projectDetails.isDemo,
+      isRealRetirement: false,
       idempotencyKey: effectiveIdempotencyKey,
       requestChecksum,
       retiredAt: null,
@@ -480,6 +545,10 @@ class TransactionService {
           processingStartedAt: null,
           linkedShipmentCount: linkedShipments.length,
         },
+        verificationStatus: projectDetails.verificationStatus,
+        disclaimer: projectDetails.isDemo
+          ? "Demo transaction - not valid for real offset claims."
+          : "CarbonFlow transaction record only until a real registry retirement reference is attached.",
       },
     };
 
@@ -538,7 +607,7 @@ class TransactionService {
         userId: actor?.id || null,
         userEmail: actor?.email || null,
         ipAddress,
-        action: "credits.checkout.started",
+        action: "marketplace_checkout_started",
         entityType: "CarbonCreditTransaction",
         entityId: updated.id,
         details: {
@@ -627,8 +696,9 @@ class TransactionService {
     const completedAt = new Date();
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const serialNumber = claimed.serialNumber || buildSerialNumber();
-      const registryRecordId = claimed.registryRecordId || buildRegistryRecordId();
-      const blockchainHash = claimed.blockchainHash || buildMockBlockchainHash(claimed.id, claimed.paymentReference);
+      const registryRecordId = claimed.registryRecordId || null;
+      const registryRetirementId = claimed.registryRetirementId || null;
+      const blockchainHash = claimed.blockchainHash || null;
       let certificate = null;
       let updatedProject = null;
       let updatedTransaction = null;
@@ -681,7 +751,10 @@ class TransactionService {
                   status: "COMPLETED",
                   serialNumber,
                   registryRecordId,
+                  registryRetirementId,
                   blockchainHash,
+                  isRealRetirement: Boolean(registryRetirementId),
+                  lifecycleStatus: registryRetirementId ? "completed" : "pending_registry_retirement",
                   completedAt,
                   retiredAt: completedAt,
                   certificate: {
@@ -693,6 +766,7 @@ class TransactionService {
                     storagePath: certificate.storagePath,
                     fileName: certificate.fileName,
                   },
+                  certificateId: certificate.certificateId,
                   metadata: buildCheckoutMetadata(claimed.metadata, {
                     processingStartedAt: completedAt,
                     completedAt,
@@ -758,13 +832,14 @@ class TransactionService {
           userId: actor?.id || claimed.userId || null,
           userEmail: actor?.email || claimed.metadata?.initiatedBy?.userEmail || null,
           ipAddress,
-          action: "credits.checkout.completed",
+          action: "marketplace_checkout_completed",
           entityType: "CarbonCreditTransaction",
           entityId: claimed.id,
           details: {
             serialNumber: updatedTransaction.serialNumber,
             registryRecordId: updatedTransaction.registryRecordId,
-            blockchainHash: updatedTransaction.blockchainHash,
+            registryRetirementId: updatedTransaction.registryRetirementId || null,
+            blockchainHash: updatedTransaction.blockchainHash || null,
             quantity: updatedTransaction.credits,
             totalCostUsd: updatedTransaction.totalCostUsd,
             certificateChecksum: updatedTransaction.certificate?.checksum || null,
@@ -873,6 +948,19 @@ class TransactionService {
     if (checksum !== transactionView.certificate.checksum) {
       throw new ApiError(409, "Certificate integrity verification failed.");
     }
+
+    await AuditService.log({
+      companyId,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      ipAddress: options.ipAddress || null,
+      action: "marketplace_certificate_downloaded",
+      entityType: "CarbonCreditTransaction",
+      entityId: transactionView.id,
+      details: {
+        certificateId: transactionView.certificateId || transactionView.certificate?.certificateId || null,
+      },
+    });
 
     return {
       fileName: transactionView.certificate.fileName || `${transactionView.serialNumber || transactionView.id}.pdf`,

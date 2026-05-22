@@ -11,16 +11,30 @@ export function OptimizationPage() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const lastErrorRef = useRef("");
   const [inputValue, setInputValue] = useState("");
+  const [filters, setFilters] = useState<Record<string, string>>({});
   const debouncedInputValue = useDebouncedValue(inputValue, 500);
   const {
     loading,
     error,
     results,
+    context,
+    runs,
+    exporting,
     lastSubmittedQuery,
+    loadContext,
+    loadRuns,
     analyze,
     retry,
+    updateStatus,
+    exportRun,
+    openRun,
     clearError,
   } = useOptimizationStore();
+
+  useEffect(() => {
+    void loadContext();
+    void loadRuns();
+  }, [loadContext, loadRuns]);
 
   useEffect(() => {
     if (error && error !== lastErrorRef.current) {
@@ -58,11 +72,36 @@ export function OptimizationPage() {
         setInputValue(normalizedQuery);
       }
 
-      await analyze(nextQuery);
+      await analyze(nextQuery, filters);
     } catch {
       if (!optimizationService.normalizeQuery(nextQuery)) {
         inputRef.current?.focus();
       }
+    }
+  }
+
+  async function downloadOptimizationRun(runId: string, format: "PDF" | "CSV") {
+    try {
+      const blob = await exportRun(runId, format);
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = `optimization-${runId}.${format.toLowerCase()}`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+      showToast({
+        tone: "success",
+        title: "Optimization export ready",
+        description: `${format} export downloaded using your authenticated session.`,
+      });
+    } catch (error) {
+      showToast({
+        tone: "error",
+        title: "Optimization export failed",
+        description: error instanceof Error ? error.message : "Unable to export optimization report.",
+      });
     }
   }
 
@@ -80,8 +119,18 @@ export function OptimizationPage() {
         inputValue={inputValue}
         helperText={helperText}
         loading={loading}
+        context={context}
+        analysisMode={results?.analysisMode || context?.analysisMode}
+        generatedAt={results?.generatedAt || context?.generatedAt}
+        filters={filters}
         suggestedQueries={optimizationService.suggestedQueries}
         onInputChange={setInputValue}
+        onFilterChange={(key, value) => {
+          setFilters((current) => ({
+            ...current,
+            [key]: value,
+          }));
+        }}
         onAnalyze={() => {
           void runAnalysis(inputValue);
         }}
@@ -95,8 +144,19 @@ export function OptimizationPage() {
         loading={loading}
         error={error}
         results={results}
+        runs={runs}
+        exporting={exporting}
         onRetry={() => {
           void retry();
+        }}
+        onStatusChange={(id, status) => {
+          void updateStatus(id, status);
+        }}
+        onExport={(runId, format) => {
+          void downloadOptimizationRun(runId, format);
+        }}
+        onOpenRun={(runId) => {
+          void openRun(runId);
         }}
       />
     </div>

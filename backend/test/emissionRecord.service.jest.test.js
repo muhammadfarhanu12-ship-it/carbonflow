@@ -1,4 +1,5 @@
 const EmissionRecordService = require("../services/emissionRecord.service");
+const EmissionFactorService = require("../services/emissionFactor.service");
 const AuditService = require("../services/audit.service");
 const { EmissionRecord, Supplier, AuditLog, LedgerEntry, Report, EmissionFactor } = require("../models");
 
@@ -230,13 +231,15 @@ describe("EmissionRecordService validation", () => {
       occurredAt: new Date("2026-05-15"),
       activityData: { activityType: "stationary_fuel", fuelType: "DIESEL" },
       metadata: { factorKey: "DIESEL" },
-      toObject: () => ({
-        id: "record-draft",
-        dataStatus: "draft",
-        activityAmount: 1,
-        emissionsTCo2e: 0.001,
-        metadata: { factorKey: "DIESEL" },
-      }),
+      toObject: function toObject() {
+        return {
+          id: "record-draft",
+          dataStatus: this.dataStatus,
+          activityAmount: this.activityAmount,
+          emissionsTCo2e: this.emissionsTCo2e,
+          metadata: this.metadata,
+        };
+      },
       save: jest.fn().mockResolvedValue(undefined),
     };
     jest.spyOn(EmissionRecord, "findOne").mockResolvedValue(record);
@@ -307,7 +310,7 @@ describe("EmissionRecordService validation", () => {
     jest.spyOn(EmissionFactor, "findOne").mockReturnValue({
       lean: jest.fn().mockResolvedValue({ id: "old-factor", isActive: false, factorValue: 1, version: "v1" }),
     });
-    jest.spyOn(EmissionRecordService, "resolveActivityFactor").mockResolvedValue({
+    jest.spyOn(EmissionFactorService, "resolveBestMatch").mockResolvedValue({
       id: "new-factor",
       factorValue: 2,
       factorUnit: "kgCO2e/liter",

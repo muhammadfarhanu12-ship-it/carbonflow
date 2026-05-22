@@ -7,6 +7,9 @@ import { Input } from "@/src/components/ui/input";
 interface AutoOffsetRule {
   enabled: boolean;
   intensityThreshold: number;
+  requireApproval?: boolean;
+  lastEvaluatedAt?: string | null;
+  lastEvaluation?: Record<string, unknown>;
 }
 
 interface CarbonBudgetWidgetProps {
@@ -17,7 +20,9 @@ interface CarbonBudgetWidgetProps {
   projectedMonthlySpendUsd: number;
   autoOffsetRule: AutoOffsetRule;
   requestingBudgetIncrease?: boolean;
-  onAutoOffsetRuleChange: (rule: AutoOffsetRule) => void;
+  pendingBudgetRequests?: number;
+  budgetConfigured?: boolean;
+  onAutoOffsetRuleChange: (rule: AutoOffsetRule) => void | Promise<void>;
   onRequestBudgetIncrease: () => void | Promise<void>;
 }
 
@@ -62,6 +67,8 @@ export function CarbonBudgetWidget({
   projectedMonthlySpendUsd,
   autoOffsetRule,
   requestingBudgetIncrease = false,
+  pendingBudgetRequests = 0,
+  budgetConfigured = true,
   onAutoOffsetRuleChange,
   onRequestBudgetIncrease,
 }: CarbonBudgetWidgetProps) {
@@ -111,7 +118,7 @@ export function CarbonBudgetWidget({
             <div>
               <CardTitle className="text-base">Carbon Budget</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Track available budget, pending commitments, and projected depletion from current shipment volume.
+                Track backend-approved budget, pending commitments, and projected depletion from current shipment volume.
               </p>
             </div>
           </div>
@@ -128,6 +135,11 @@ export function CarbonBudgetWidget({
           <BudgetStat label="Pending Transactions" value={formatCurrency(pendingSpendUsd)} />
           <BudgetStat label="Remaining Budget" value={formatCurrency(availableBudgetUsd)} />
         </div>
+        {!budgetConfigured ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Marketplace budget is not configured. Owners or admins must set a budget before real checkout.
+          </div>
+        ) : null}
 
         <div className="space-y-2 rounded-xl border border-emerald-100/80 bg-white/80 p-3">
           <div className="flex items-center justify-between text-sm">
@@ -166,7 +178,7 @@ export function CarbonBudgetWidget({
           <div className="space-y-3 rounded-xl border border-emerald-100/80 bg-white/85 p-4 shadow-sm">
             <p className="text-sm font-semibold text-foreground">Auto-Offset Rule</p>
             <p className="text-xs text-muted-foreground">
-              Automatically purchase credits for shipments with carbon intensity over your threshold.
+              Auto-offset will not purchase real credits without approval unless explicitly enabled.
             </p>
             <button
               type="button"
@@ -205,11 +217,16 @@ export function CarbonBudgetWidget({
               />
               <p className="text-xs text-muted-foreground">Any shipment above this value triggers an automatic offset purchase.</p>
             </div>
+            <div className="rounded-lg border border-emerald-100 bg-emerald-50/70 px-3 py-2 text-xs text-emerald-900">
+              Require approval: {autoOffsetRule.requireApproval === false ? "No" : "Yes"}
+              {autoOffsetRule.lastEvaluatedAt ? ` • Last evaluated ${new Date(autoOffsetRule.lastEvaluatedAt).toLocaleString()}` : ""}
+            </div>
           </div>
         </div>
 
         <div className="rounded-xl border border-emerald-100 bg-white/70 px-4 py-3 text-sm text-muted-foreground">
           Live published inventory currently represents {formatCurrency(liveInventoryValueUsd)} of additional retirement capacity.
+          {pendingBudgetRequests > 0 ? ` ${pendingBudgetRequests} budget increase request(s) are pending review.` : ""}
         </div>
       </CardContent>
     </Card>

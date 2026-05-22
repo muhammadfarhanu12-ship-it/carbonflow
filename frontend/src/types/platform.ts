@@ -27,7 +27,7 @@ export type SupplierEvidenceType =
 export type SupplierEvidenceStatus = "requested" | "submitted" | "under_review" | "verified" | "rejected" | "expired";
 export type ShipmentStatus = "PLANNED" | "IN_TRANSIT" | "DELAYED" | "DELIVERED";
 export type TransportMode = "ROAD" | "RAIL" | "AIR" | "OCEAN";
-export type MarketplaceListingStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED" | "SOLD_OUT";
+export type MarketplaceListingStatus = "DRAFT" | "PENDING_REVIEW" | "PUBLISHED" | "PAUSED" | "ARCHIVED" | "SOLD_OUT";
 export type CarbonRegistry = "VERRA" | "GOLD_STANDARD" | "PURO_EARTH";
 export type ProjectVerificationStatus = "VERIFIED" | "PENDING" | "ACTION_REQUIRED";
 export type ProjectSdgGoal =
@@ -42,6 +42,8 @@ export interface PaginationMeta {
   pageSize: number;
   total: number;
   totalPages: number;
+  hasNextPage?: boolean;
+  hasPreviousPage?: boolean;
 }
 
 export interface PaginatedResponse<T> {
@@ -346,6 +348,12 @@ export interface EmissionRecord {
   supplierRiskLevel?: SupplierRiskLevel | null;
   notes?: string | null;
   description?: string | null;
+  methodology?: string | null;
+  registryName?: string | null;
+  registryProjectId?: string | null;
+  registryUrl?: string | null;
+  country?: string | null;
+  region?: string | null;
   amountTonnes: number;
   emissionsKgCo2e?: number;
   emissionsTCo2e?: number;
@@ -489,6 +497,12 @@ export interface CarbonProject {
   type: string;
   location: string;
   description?: string | null;
+  methodology?: string | null;
+  registryName?: string | null;
+  registryProjectId?: string | null;
+  registryUrl?: string | null;
+  country?: string | null;
+  region?: string | null;
   coordinates?: {
     latitude: number | null;
     longitude: number | null;
@@ -503,12 +517,27 @@ export interface CarbonProject {
   verificationStandard?: string | null;
   rating: number;
   pricePerCreditUsd: number;
+  pricePerTco2e?: number;
+  currency?: string;
+  totalQuantityTco2e?: number;
+  availableQuantityTco2e?: number;
+  retiredQuantityTco2e?: number;
+  reservedQuantityTco2e?: number;
   pricePerTonUsd?: number;
   availableCredits: number;
   reservedCredits: number;
   availableToPurchase: number;
   retiredCredits: number;
   status: MarketplaceListingStatus;
+  verificationStatus?: "UNVERIFIED" | "SELF_REPORTED" | "THIRD_PARTY_VERIFIED" | "REGISTRY_VERIFIED" | "REJECTED" | "EXPIRED";
+  isDemo?: boolean;
+  isSample?: boolean;
+  isRealInventory?: boolean;
+  evidenceDocuments?: Array<{
+    name: string;
+    url: string;
+    type?: string;
+  }>;
   verificationDetails?: {
     registries: CarbonRegistry[];
     verificationStatus: ProjectVerificationStatus;
@@ -544,7 +573,9 @@ export interface CarbonCreditTransaction {
   companyName: string;
   projectName: string;
   registry: string;
+  registryProjectId?: string | null;
   registryRecordId?: string | null;
+  registryRetirementId?: string | null;
   blockchainHash?: string | null;
   vintageYear: number;
   shipmentId?: string | null;
@@ -563,8 +594,20 @@ export interface CarbonCreditTransaction {
   totalCostUsd: number;
   tCO2eRetired: number;
   serialNumber: string | null;
+  certificateId?: string | null;
+  isDemo?: boolean;
+  isRealRetirement?: boolean;
   status: "PENDING" | "COMPLETED" | "FAILED";
+  lifecycleStatus?: "draft" | "pending_budget_approval" | "pending_payment" | "payment_verified" | "pending_registry_retirement" | "retired" | "completed" | "failed" | "cancelled" | "refunded";
   paymentReference: string;
+  paymentProvider?: string;
+  paymentStatus?: "not_required" | "pending" | "invoice_sent" | "paid" | "failed" | "refunded" | "cancelled";
+  invoiceNumber?: string | null;
+  invoiceUrl?: string | null;
+  registryProvider?: string;
+  registryRetirementStatus?: "not_required" | "pending" | "submitted" | "retired" | "failed" | "manual_verification_required" | "manually_verified";
+  registryRetirementUrl?: string | null;
+  registryRetiredAt?: string | null;
   createdAt: string;
   completedAt: string | null;
   retiredAt: string | null;
@@ -608,14 +651,73 @@ export interface MarketplaceOverview extends PaginatedResponse<CarbonProject> {
   };
 }
 
+export interface MarketplaceBudget {
+  id: string | null;
+  companyId: string | null;
+  totalBudget: number;
+  settledSpend: number;
+  pendingSpend: number;
+  remainingBudget: number;
+  currency: string;
+  monthlyBudget?: number | null;
+  approvalRequiredThreshold?: number | null;
+  updatedAt?: string | null;
+  isConfigured: boolean;
+}
+
+export interface MarketplaceBudgetRequest {
+  id: string;
+  companyId: string;
+  requestedAmount: number;
+  currentBudget: number;
+  reason?: string | null;
+  status: "pending" | "approved" | "rejected";
+  requestedBy?: string | null;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
+  createdAt: string;
+}
+
+export interface AutoOffsetRule {
+  enabled: boolean;
+  carbonIntensityThreshold: number;
+  intensityThreshold: number;
+  maxSpendPerMonth?: number | null;
+  preferredProjectTypes: string[];
+  preferredRegistries: string[];
+  requireApproval: boolean;
+  lastEvaluatedAt?: string | null;
+  lastEvaluation?: Record<string, unknown>;
+  isConfigured: boolean;
+}
+
 export interface ReportItem {
   id: string;
   name: string;
+  reportName?: string;
   type: "ESG" | "COMPLIANCE" | "ANALYTICS" | "CUSTOM";
-  format: "CSV" | "PDF";
+  reportType?: "esg_pdf" | "scope_export_csv" | "custom_extract" | "carbon_ledger" | "supplier_esg" | "shipment_emissions" | "marketplace_retirement";
+  format: "CSV" | "PDF" | "JSON";
+  outputFormat?: "CSV" | "PDF" | "JSON";
+  reportingPeriodStart?: string | null;
+  reportingPeriodEnd?: string | null;
+  inclusionPolicy?: "approved_only" | "all_records_with_warning" | "all_records";
   generatedAt: string;
-  status: "READY" | "PROCESSING" | "FAILED";
+  completedAt?: string | null;
+  failedAt?: string | null;
+  failureReason?: string | null;
+  generatedBy?: string | null;
+  status: "READY" | "PROCESSING" | "FAILED" | "queued" | "generating" | "completed" | "failed" | "archived";
   downloadUrl: string;
+  recordCounts?: Record<string, number>;
+  scopeTotals?: Record<string, number>;
+  dataQualitySummary?: Record<string, unknown>;
+  sampleFactorCount?: number;
+  missingFactorCount?: number;
+  unapprovedRecordCount?: number;
+  staleFactorCount?: number;
+  warnings?: string[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface AuditLogItem {
@@ -623,39 +725,95 @@ export interface AuditLogItem {
   companyId?: string | null;
   userId?: string | null;
   userEmail?: string | null;
+  userName?: string | null;
   action: string;
+  actionLabel?: string | null;
   entityType?: string | null;
   entityId?: string | null;
+  entityLabel?: string | null;
+  module?: "auth" | "user" | "supplier" | "shipment" | "emission" | "ledger" | "report" | "marketplace" | "optimization" | "admin" | "settings" | "system" | "import" | string;
+  severity?: "info" | "low" | "medium" | "high" | "critical" | string;
+  category?: string | null;
   ipAddress?: string | null;
   userAgent?: string | null;
+  requestId?: string | null;
+  source?: "web" | "admin_panel" | "api" | "system" | "import" | "automation" | string;
+  status?: "success" | "failed" | string;
+  errorCode?: string | null;
   oldValue?: Record<string, unknown> | null;
   newValue?: Record<string, unknown> | null;
+  changesSummary?: string[];
+  reason?: string | null;
+  metadata?: Record<string, unknown> | null;
   details?: Record<string, unknown> | null;
+  retentionUntil?: string | null;
+  retentionPolicy?: string | null;
+  integrityHash?: string | null;
+  previousHash?: string | null;
   createdAt: string;
+}
+
+export interface AuditSummary {
+  totalEvents: number;
+  highCriticalEvents: number;
+  failedActions: number;
+  exportsDownloads: number;
+  permissionSecurityEvents: number;
+  eventsInSelectedPeriod: number;
 }
 
 export interface IntegrationStatus {
+  id?: string;
   name: string;
+  providerType?: string;
+  providerName?: string;
   status: string;
   lastSync: string | null;
+  lastSyncAt?: string | null;
+  lastSuccessfulSyncAt?: string | null;
+  lastFailedSyncAt?: string | null;
+  lastError?: string | null;
+  syncStatus?: string;
+  configMetadata?: Record<string, unknown>;
+  syncHistory?: Array<Record<string, unknown>>;
 }
 
 export interface ApiKeyItem {
+  id?: string;
   label: string;
-  key: string;
+  key?: string;
+  maskedKey?: string;
+  prefix?: string;
+  last4?: string;
+  scopes?: string[];
+  status?: "active" | "revoked" | "expired" | string;
+  expiresAt?: string | null;
+  lastUsedAt?: string | null;
+  createdBy?: string | null;
   createdAt: string;
+  revokedAt?: string | null;
 }
 
 export interface OrganizationSettings {
   companyName: string;
+  legalName?: string | null;
   industry: string;
   headquarters: string;
   region: string;
+  country?: string | null;
   currency: string;
+  fiscalYearStartMonth?: number;
+  reportingYear?: number;
   carbonPricePerTon: number;
   netZeroTargetYear: number;
   revenueUsd: number;
   annualShipmentWeightKg: number;
+  preferredUnits?: "metric" | "imperial";
+  defaultReportingBoundary?: "operational_control" | "financial_control" | "equity_share";
+  defaultReportInclusionPolicy?: "approved_only" | "all_with_warning";
+  dataRetentionYears?: number;
+  updatedAt?: string | null;
+  updatedBy?: string | null;
 }
 
 export interface OperationalMetrics {
@@ -668,6 +826,9 @@ export interface OperationalMetrics {
   companyVehicleKm: number;
   stationaryFuelType: string;
   mobileFuelType: string;
+  defaultReportingPeriod?: string;
+  notes?: string;
+  source?: string;
 }
 
 export interface EmissionFactorOverrides {
@@ -675,6 +836,18 @@ export interface EmissionFactorOverrides {
   electricity: Record<string, number>;
   fuels: Record<string, number>;
   fleet: Record<string, number>;
+}
+
+export interface EmissionFactorOverrideMetadata {
+  sourceName?: string;
+  sourceYear?: number | "";
+  unit?: string;
+  region?: string;
+  country?: string;
+  reason?: string;
+  approvalStatus?: string;
+  updatedBy?: string | null;
+  updatedAt?: string | null;
 }
 
 export interface ManagedUser {
@@ -694,35 +867,61 @@ export interface UserSettings {
   profile: {
     name: string;
     email: string;
+    emailVerified?: boolean;
+    role?: UserRole;
+    companyName?: string;
+    timezone?: string | null;
+    locale?: string | null;
+    lastLoginAt?: string | null;
+    createdAt?: string | null;
   };
   company: OrganizationSettings;
   organization: OrganizationSettings;
   operationalMetrics: OperationalMetrics;
   emissionFactors: EmissionFactorOverrides;
+  emissionFactorMetadata?: EmissionFactorOverrideMetadata;
   preferences: {
     notificationsEnabled: boolean;
     securityAlertsEnabled: boolean;
+    reportNotificationsEnabled?: boolean;
+    integrationSyncNotificationsEnabled?: boolean;
+    marketplaceNotificationsEnabled?: boolean;
+  };
+  security?: {
+    mfaStatus?: string;
+    activeSessionsSupported?: boolean;
+    ssoStatus?: string;
+    passwordPolicy?: string;
   };
   integrations: IntegrationStatus[];
   apiKeys: ApiKeyItem[];
+  oneTimeApiKey?: string;
+  oneTimeApiKeyId?: string;
 }
 
 export interface SettingsPayload {
   profile?: {
     name: string;
-    email: string;
+    email?: string;
+    timezone?: string | null;
+    locale?: string | null;
   };
   company?: Partial<OrganizationSettings>;
   organization?: Partial<OrganizationSettings>;
   operationalMetrics?: Partial<OperationalMetrics>;
   emissionFactors?: Partial<EmissionFactorOverrides>;
+  emissionFactorMetadata?: EmissionFactorOverrideMetadata;
   preferences?: {
     notificationsEnabled: boolean;
     securityAlertsEnabled: boolean;
+    reportNotificationsEnabled?: boolean;
+    integrationSyncNotificationsEnabled?: boolean;
+    marketplaceNotificationsEnabled?: boolean;
   };
   password?: {
     currentPassword: string;
     newPassword: string;
+    confirmPassword?: string;
   };
 }
 

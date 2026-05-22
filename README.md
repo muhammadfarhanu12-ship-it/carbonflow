@@ -4,6 +4,8 @@ CarbonFlow is a multi-tenant carbon accounting MVP for Scope 1, Scope 2, and Sco
 
 Supplier module setup, scoring, questionnaire, evidence, RBAC, and audit details are documented in [docs/SUPPLIER_MODULE.md](docs/SUPPLIER_MODULE.md).
 
+Optimization module data sources, rule-based analysis behavior, RBAC, audit logs, privacy notes, and the production smoke checklist are documented in [docs/OPTIMIZATION_MODULE.md](docs/OPTIMIZATION_MODULE.md).
+
 ## Local Setup
 
 Backend:

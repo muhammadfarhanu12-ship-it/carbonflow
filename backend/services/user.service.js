@@ -14,6 +14,7 @@ function toSafeUser(user) {
     email: user.email,
     role: user.role,
     status: user.status,
+    emailVerified: Boolean(user.isVerified),
     companyId: user.companyId || null,
     organizationId: user.companyId || null,
     company: user.company || null,
@@ -24,7 +25,7 @@ function toSafeUser(user) {
 }
 
 function isPrivileged(role) {
-  return ["ADMIN", "MANAGER", "SUPERADMIN"].includes(String(role || "").toUpperCase());
+  return ["OWNER", "ADMIN", "MANAGER", "SUPERADMIN"].includes(String(role || "").toUpperCase());
 }
 
 function canAssignRole(requesterRole, nextRole) {
@@ -35,16 +36,16 @@ function canAssignRole(requesterRole, nextRole) {
     return false;
   }
 
-  if (normalizedRequesterRole === "SUPERADMIN") {
+  if (["SUPERADMIN", "OWNER"].includes(normalizedRequesterRole)) {
     return true;
   }
 
   if (normalizedRequesterRole === "ADMIN") {
-    return normalizedNextRole !== "SUPERADMIN";
+    return !["SUPERADMIN", "OWNER"].includes(normalizedNextRole);
   }
 
   if (normalizedRequesterRole === "MANAGER") {
-    return ["ANALYST", "USER"].includes(normalizedNextRole);
+    return ["ANALYST", "USER", "DATA_ENTRY", "VIEWER", "AUDITOR"].includes(normalizedNextRole);
   }
 
   return false;
@@ -131,7 +132,7 @@ class UserService {
       companyId: requester.companyId,
       userId: requester.id,
       userEmail: requester.email,
-      action: "user.created",
+      action: "user_invited",
       entityType: "User",
       entityId: user.id,
       details: {
@@ -172,7 +173,7 @@ class UserService {
     }
 
     if (payload.email && payload.email !== user.email) {
-      await ensureUniqueEmail(payload.email, userId);
+      throw new ApiError(422, "Email changes require the dedicated verification workflow.");
     }
 
     if (payload.newPassword) {
@@ -182,17 +183,32 @@ class UserService {
       }
 
       user.password = await bcrypt.hash(payload.newPassword, env.auth.bcryptSaltRounds);
+      await AuditService.log({
+        companyId: user.companyId,
+        userId: user.id,
+        userEmail: user.email,
+        action: "password_changed",
+        entityType: "User",
+        entityId: user.id,
+        severity: "critical",
+        category: "security",
+      });
     }
 
     if (payload.name) {
       user.name = payload.name;
     }
 
-    if (payload.email) {
-      user.email = payload.email;
-    }
-
     await user.save();
+    await AuditService.log({
+      companyId: user.companyId,
+      userId: user.id,
+      userEmail: user.email,
+      action: "profile_updated",
+      entityType: "User",
+      entityId: user.id,
+      newValue: { name: user.name },
+    });
     return toSafeUser(await User.findById(userId).populate("company"));
   }
 
@@ -222,6 +238,18 @@ class UserService {
       throw new ApiError(403, "You do not have permission to assign that role");
     }
 
+    if (payload.role && id === requester.id && ["OWNER", "ADMIN", "SUPERADMIN"].includes(String(user.role).toUpperCase())) {
+      const remainingAdmins = await User.countDocuments({
+        companyId: requester.companyId,
+        _id: { $ne: id },
+        role: { $in: ["OWNER", "ADMIN", "SUPERADMIN"] },
+        status: "ACTIVE",
+      });
+      if (remainingAdmins === 0) {
+        throw new ApiError(422, "You cannot demote yourself as the last workspace administrator.");
+      }
+    }
+
     const oldValue = {
       role: user.role,
       status: user.status,
@@ -247,7 +275,7 @@ class UserService {
       companyId: requester.companyId,
       userId: requester.id,
       userEmail: requester.email,
-      action: roleChanged ? "user_role_changed" : "user.updated",
+      action: roleChanged ? "user_role_changed" : (payload.status === "SUSPENDED" ? "user_deactivated" : "user_updated"),
       entityType: "User",
       entityId: id,
       oldValue,
@@ -281,6 +309,18 @@ class UserService {
 
     if (!canAssignRole(requester.role, user.role) && requester.role !== "SUPERADMIN") {
       throw new ApiError(403, "You do not have permission to delete this user");
+    }
+
+    if (["OWNER", "ADMIN", "SUPERADMIN"].includes(String(user.role).toUpperCase())) {
+      const remainingAdmins = await User.countDocuments({
+        companyId: requester.companyId,
+        _id: { $ne: id },
+        role: { $in: ["OWNER", "ADMIN", "SUPERADMIN"] },
+        status: "ACTIVE",
+      });
+      if (remainingAdmins === 0) {
+        throw new ApiError(422, "Cannot remove the last workspace administrator.");
+      }
     }
 
     await user.deleteOne();
