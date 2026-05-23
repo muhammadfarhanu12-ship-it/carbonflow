@@ -9,6 +9,7 @@ import type {
   AdminUser,
   BillingOverview,
   EmissionFactor,
+  EmissionFactorImportPreview,
   Invoice,
   AdminCompany,
   AdminMarketplaceProject,
@@ -34,6 +35,9 @@ export const adminService = {
   createEmissionFactor: (data: Partial<EmissionFactor>) => apiClient.post<EmissionFactor>("/admin/emission-factors", data),
   updateEmissionFactor: (id: string, data: Partial<EmissionFactor>) => apiClient.patch<EmissionFactor>(`/admin/emission-factors/${id}`, data),
   deactivateEmissionFactor: (id: string) => apiClient.patch<EmissionFactor>(`/admin/emission-factors/${id}/deactivate`),
+  reactivateEmissionFactor: (id: string) => apiClient.patch<EmissionFactor>(`/admin/emission-factors/${id}/reactivate`),
+  previewEmissionFactorCsv: (csv: string, companyId?: string) => apiClient.post<EmissionFactorImportPreview>("/admin/emission-factors/import/preview", { csv, companyId }),
+  commitEmissionFactorCsv: (csv: string, companyId?: string) => apiClient.post<EmissionFactorImportPreview>("/admin/emission-factors/import/commit", { csv, companyId }),
 
   getMarketplaceProjects: async (pageSize = DEFAULT_PAGE_SIZE) => {
     const response = await apiClient.get<MarketplaceOverview>(`/marketplace?pageSize=${pageSize}&includeAllStatuses=true`);

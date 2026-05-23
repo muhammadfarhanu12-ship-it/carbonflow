@@ -47,9 +47,12 @@ router.get("/carbon-data", carbonDataValidator, validateRequest, catchAsync(admi
 
 router.get("/emission-factors", requireAdminPermission("factor:manage"), catchAsync(adminController.getEmissionFactors));
 router.post("/emission-factors", requireAdminPermission("factor:manage"), catchAsync(adminController.createEmissionFactor));
+router.post("/emission-factors/import/preview", requireAdminPermission("factor:manage"), catchAsync(adminController.previewEmissionFactorCsv));
+router.post("/emission-factors/import/commit", requireAdminPermission("factor:manage"), catchAsync(adminController.uploadEmissionFactorCsv));
 router.put("/emission-factors/:id", requireAdminPermission("factor:manage"), catchAsync(adminController.updateEmissionFactor));
 router.patch("/emission-factors/:id", requireAdminPermission("factor:manage"), catchAsync(adminController.updateEmissionFactor));
 router.patch("/emission-factors/:id/deactivate", requireAdminPermission("factor:manage"), catchAsync(adminController.deactivateEmissionFactor));
+router.patch("/emission-factors/:id/reactivate", requireAdminPermission("factor:manage"), catchAsync(adminController.reactivateEmissionFactor));
 
 router.get("/supplier-benchmarks", requireAdminPermission("factor:manage"), catchAsync(adminController.getSupplierBenchmarks));
 router.post("/supplier-benchmarks", requireAdminPermission("factor:manage"), catchAsync(adminController.createSupplierBenchmark));

@@ -1,5 +1,5 @@
 import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
-import { Edit, Loader2, Plus, Search, XCircle } from "lucide-react";
+import { CheckCircle2, Edit, Loader2, Plus, Search, Upload, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card";
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
@@ -18,12 +18,16 @@ const emptyForm: Partial<EmissionFactor> = {
   factorUnit: "kgCO2e/unit",
   sourceName: "",
   sourceYear: new Date().getUTCFullYear(),
+  sourceUrl: "",
+  methodology: "",
   country: "",
   region: "GLOBAL",
   version: "v1",
   effectiveFrom: "",
   effectiveTo: "",
   isSample: false,
+  isOfficial: true,
+  isCustom: false,
   isActive: true,
 };
 
@@ -35,6 +39,10 @@ export function CarbonDataPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [csvText, setCsvText] = useState("");
+  const [csvCompanyId, setCsvCompanyId] = useState("");
+  const [importPreview, setImportPreview] = useState<Awaited<ReturnType<typeof adminService.previewEmissionFactorCsv>> | null>(null);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
 
   const query = useMemo(() => {
     const params = new URLSearchParams({ pageSize: "100" });
@@ -88,6 +96,9 @@ export function CarbonDataPage() {
         factorValue: Number(form.factorValue),
         sourceYear: Number(form.sourceYear),
         isSample: Boolean(form.isSample),
+        isOfficial: Boolean(form.isOfficial),
+        isCustom: Boolean(form.isCustom),
+        isActive: form.isActive !== false,
       };
 
       if (editingId) {
@@ -112,6 +123,45 @@ export function CarbonDataPage() {
       await loadFactors();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to deactivate emission factor");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const reactivateFactor = async (id: string) => {
+    setSaving(true);
+    try {
+      await adminService.reactivateEmissionFactor(id);
+      await loadFactors();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reactivate emission factor");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const previewCsv = async () => {
+    setSaving(true);
+    try {
+      setError(null);
+      setImportMessage(null);
+      setImportPreview(await adminService.previewEmissionFactorCsv(csvText, csvCompanyId || undefined));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to preview factor CSV");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const commitCsv = async () => {
+    setSaving(true);
+    try {
+      const result = await adminService.commitEmissionFactorCsv(csvText, csvCompanyId || undefined);
+      setImportPreview(result);
+      setImportMessage(`Imported ${result.createdCount || 0} valid emission factor row${result.createdCount === 1 ? "" : "s"}.`);
+      await loadFactors();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to import factor CSV");
     } finally {
       setSaving(false);
     }
@@ -149,20 +199,80 @@ export function CarbonDataPage() {
             <Field label="Factor Unit"><Input value={form.factorUnit || ""} onChange={(event) => setForm((current) => ({ ...current, factorUnit: event.target.value }))} required /></Field>
             <Field label="Source Name"><Input value={form.sourceName || ""} onChange={(event) => setForm((current) => ({ ...current, sourceName: event.target.value }))} required /></Field>
             <Field label="Source Year"><Input type="number" value={form.sourceYear ?? ""} onChange={(event) => setForm((current) => ({ ...current, sourceYear: Number(event.target.value) }))} required /></Field>
+            <Field label="Source URL"><Input value={form.sourceUrl || ""} onChange={(event) => setForm((current) => ({ ...current, sourceUrl: event.target.value }))} /></Field>
+            <Field label="Methodology"><Input value={form.methodology || ""} onChange={(event) => setForm((current) => ({ ...current, methodology: event.target.value }))} /></Field>
             <Field label="Country"><Input value={form.country || ""} onChange={(event) => setForm((current) => ({ ...current, country: event.target.value }))} /></Field>
             <Field label="Region"><Input value={form.region || ""} onChange={(event) => setForm((current) => ({ ...current, region: event.target.value }))} /></Field>
             <Field label="Version"><Input value={form.version || ""} onChange={(event) => setForm((current) => ({ ...current, version: event.target.value }))} /></Field>
             <Field label="Effective From"><Input type="date" value={form.effectiveFrom || ""} onChange={(event) => setForm((current) => ({ ...current, effectiveFrom: event.target.value }))} /></Field>
             <Field label="Effective To"><Input type="date" value={form.effectiveTo || ""} onChange={(event) => setForm((current) => ({ ...current, effectiveTo: event.target.value }))} /></Field>
+            <Field label="Company ID"><Input value={form.companyId || ""} onChange={(event) => setForm((current) => ({ ...current, companyId: event.target.value }))} placeholder="Required for custom factors" /></Field>
+            <Field label="Factor Status">
+              <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={form.isSample ? "sample" : form.isCustom ? "custom" : "official"} onChange={(event) => {
+                const value = event.target.value;
+                setForm((current) => ({ ...current, isSample: value === "sample", isOfficial: value === "official", isCustom: value === "custom" }));
+              }}>
+                <option value="official">Official/global</option>
+                <option value="custom">Custom/company</option>
+                <option value="sample">Sample fallback</option>
+              </select>
+            </Field>
             <label className="flex items-center gap-2 pt-7 text-sm">
-              <input type="checkbox" checked={Boolean(form.isSample)} onChange={(event) => setForm((current) => ({ ...current, isSample: event.target.checked }))} />
-              Sample factor
+              <input type="checkbox" checked={form.isActive !== false} onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))} />
+              Active
             </label>
             <div className="flex items-end gap-2">
               <Button type="submit" disabled={saving}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}{editingId ? "Save" : "Create"}</Button>
               {editingId && <Button type="button" variant="outline" onClick={resetForm}>Cancel</Button>}
             </div>
           </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Import Factors From CSV</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <textarea
+            className="min-h-32 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            value={csvText}
+            onChange={(event) => setCsvText(event.target.value)}
+            placeholder="scope,category,activityType,factorKey,activityUnit,factorValue,factorUnit,sourceName,sourceYear,sourceUrl,country,region,version,effectiveFrom,effectiveTo,isOfficial,isCustom"
+          />
+          <Input value={csvCompanyId} onChange={(event) => setCsvCompanyId(event.target.value)} placeholder="Default company ID for custom CSV rows" />
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" disabled={saving || !csvText.trim()} onClick={previewCsv}><Search className="mr-2 h-4 w-4" />Preview CSV</Button>
+            <Button type="button" disabled={saving || !importPreview?.validRows} onClick={commitCsv}><Upload className="mr-2 h-4 w-4" />Save Valid Rows</Button>
+          </div>
+          {importMessage ? <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{importMessage}</div> : null}
+          {importPreview ? (
+            <div className="space-y-3">
+              <div className="grid gap-3 md:grid-cols-4">
+                <ImportStat label="Rows" value={importPreview.totalRows} />
+                <ImportStat label="Valid" value={importPreview.validRows} />
+                <ImportStat label="Invalid" value={importPreview.invalidRows} />
+                <ImportStat label="Duplicate warnings" value={importPreview.duplicateWarnings} />
+              </div>
+              <div className="max-h-72 overflow-auto rounded-md border border-border">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-muted text-muted-foreground">
+                    <tr><th className="px-3 py-2">Row</th><th className="px-3 py-2">Factor</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Validation</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {importPreview.rows.map((row) => (
+                      <tr key={row.rowNumber}>
+                        <td className="px-3 py-2">{row.rowNumber}</td>
+                        <td className="px-3 py-2">{row.payload.factorKey || "-"} {row.payload.factorValue ? `${row.payload.factorValue} ${row.payload.factorUnit || ""}` : ""}</td>
+                        <td className="px-3 py-2">{row.valid ? "Valid" : "Invalid"}</td>
+                        <td className="px-3 py-2">{[...row.errors, ...row.warnings].join(" ") || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -230,7 +340,7 @@ export function CarbonDataPage() {
                     <td className="px-4 py-3">{factor.country || factor.region || "GLOBAL"}</td>
                     <td className="px-4 py-3">
                       <span className={factor.isSample ? "rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800" : "rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-800"}>
-                        {factor.isSample ? "Sample" : factor.companyId ? "Custom" : "Official"}
+                        {factor.isSample ? "Sample" : factor.isCustom || factor.companyId ? "Custom" : "Official"}
                       </span>
                       <span className={factor.isActive ? "ml-2 rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary" : "ml-2 rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground"}>
                         {factor.isActive ? "Active" : "Inactive"}
@@ -239,6 +349,7 @@ export function CarbonDataPage() {
                     <td className="px-4 py-3 text-right">
                       <Button size="sm" variant="ghost" onClick={() => editFactor(factor)}><Edit className="mr-2 h-4 w-4" />Edit</Button>
                       {factor.isActive && <Button size="sm" variant="ghost" onClick={() => deactivateFactor(factor.id)}><XCircle className="mr-2 h-4 w-4" />Deactivate</Button>}
+                      {!factor.isActive && <Button size="sm" variant="ghost" onClick={() => reactivateFactor(factor.id)}><CheckCircle2 className="mr-2 h-4 w-4" />Reactivate</Button>}
                     </td>
                   </tr>
                 ))}
@@ -256,6 +367,15 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
     <div className="space-y-2">
       <Label>{label}</Label>
       {children}
+    </div>
+  );
+}
+
+function ImportStat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-md border border-border bg-muted/20 px-3 py-2">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="text-sm font-semibold text-foreground">{value}</div>
     </div>
   );
 }

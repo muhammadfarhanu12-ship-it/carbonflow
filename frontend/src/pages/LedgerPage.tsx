@@ -1056,6 +1056,8 @@ function buildCalculationPreview(activityForm: EmissionActivityPayload, factor: 
     sourceName: factor.sourceName,
     sourceYear: factor.sourceYear,
     isSample: factor.isSample !== false,
+    isOfficial: factor.isOfficial === true || (factor.isSample === false && !factor.isCustom),
+    isCustom: factor.isCustom === true,
   };
 }
 
@@ -1075,10 +1077,15 @@ function CalculationPreviewPanel({
   return (
     <div className={`${preview.isSample ? "border-amber-300 bg-amber-50 text-amber-900" : "border-emerald-300 bg-emerald-50 text-emerald-800"} rounded-md border px-3 py-2 text-xs md:col-span-2 xl:col-span-4`}>
       <div className="font-medium">Calculation preview</div>
-      <div>{preview.amount} {preview.unit} x {preview.factorValue} {preview.factorUnit} = {preview.kg.toFixed(2)} kgCO2e = {preview.tonnes.toFixed(4)} tCO2e</div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span>{preview.isSample ? "Sample" : preview.isCustom ? "Custom" : "Official"}</span>
+        <span>{preview.sourceName || "Configured emission factor"} {preview.sourceYear || ""}</span>
+      </div>
+      <div>Matched factor: {preview.factorValue} {preview.factorUnit}</div>
+      <div>Formula: {preview.amount} {preview.unit} x {preview.factorValue} {preview.factorUnit} = {preview.kg.toFixed(2)} kgCO2e = {preview.tonnes.toFixed(4)} tCO2e</div>
       <div>{buildLedgerFactorMessage(matchedFactor)}</div>
       {preview.amount <= 0 ? <div>Activity amount must be greater than 0 before this can be a calculated record.</div> : null}
-      {preview.isSample ? <div>This activity uses a sample factor and should not be used for official reporting.</div> : null}
+      {preview.isSample ? <div>This activity uses a sample emission factor. Replace with an official/custom factor before official reporting.</div> : null}
     </div>
   );
 }

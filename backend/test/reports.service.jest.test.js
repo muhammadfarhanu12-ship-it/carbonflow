@@ -83,8 +83,37 @@ describe("ReportsService", () => {
     expect(csv).toContain("Acme Carbon");
     expect(csv).toContain("Reporting Period");
     expect(csv).toContain("Emission Activity Calculation Detail");
-    expect(csv).toContain("This MVP uses sample emission factors. Replace with official factors before production use.");
+    expect(csv).toContain("Sample emission factors are fallback placeholders and must be replaced with official/custom factors before official reporting.");
     expect(csv).toContain("emissions = activityAmount x emissionFactor");
+  });
+
+  test("CSV report does not warn when only official/custom factors are used", () => {
+    const dataset = buildDataset();
+    dataset.emissionRecords = [{
+      ...dataset.emissionRecords[0],
+      factorSource: "Verified source",
+      factorSourceName: "Verified source",
+      factorSourceYear: 2025,
+      factorIsSample: false,
+      factorIsOfficial: true,
+      factorIsCustom: false,
+    }];
+    dataset.dataQualityNotes = {
+      ...dataset.dataQualityNotes,
+      sampleFactorRecords: 0,
+    };
+
+    const csv = ReportsService.buildCsv({
+      name: "Official Factor Report",
+      type: "ESG",
+      format: "CSV",
+      generatedAt: new Date("2026-05-18T00:00:00.000Z"),
+    }, dataset);
+
+    expect(csv).toContain("Verified source");
+    expect(csv).toContain("official");
+    expect(csv).not.toContain("Sample Factor Warning");
+    expect(csv).not.toContain("Sample Factor Disclaimer");
   });
 
   test("rejects invalid report generation payload before database write", async () => {

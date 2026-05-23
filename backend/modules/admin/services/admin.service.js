@@ -431,6 +431,18 @@ class AdminService {
     return EmissionFactorService.deactivate(id, admin);
   }
 
+  static reactivateEmissionFactor(id, admin) {
+    return EmissionFactorService.reactivate(id, admin);
+  }
+
+  static previewEmissionFactorCsv(csv, admin) {
+    return EmissionFactorService.previewImport(csv, admin);
+  }
+
+  static uploadEmissionFactorCsv(csv, admin) {
+    return EmissionFactorService.commitImport(csv, admin);
+  }
+
   static listSupplierBenchmarks(query = {}) {
     return SupplierBenchmarkDatasetService.list(query);
   }

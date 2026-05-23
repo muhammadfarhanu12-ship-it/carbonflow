@@ -55,14 +55,33 @@ export interface EmissionFactor {
   source?: string | null;
   sourceName: string;
   sourceYear: number;
+  sourceUrl?: string | null;
+  methodology?: string | null;
   country?: string | null;
   region: string;
   version: string;
   effectiveFrom?: string | null;
   effectiveTo?: string | null;
   isSample: boolean;
+  isOfficial: boolean;
+  isCustom: boolean;
   isActive: boolean;
   updatedAt: string;
+}
+
+export interface EmissionFactorImportPreview {
+  totalRows: number;
+  validRows: number;
+  invalidRows: number;
+  duplicateWarnings: number;
+  rows: Array<{
+    rowNumber: number;
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
+    payload: Partial<EmissionFactor>;
+  }>;
+  createdCount?: number;
 }
 
 export interface AdminMarketplaceProject {

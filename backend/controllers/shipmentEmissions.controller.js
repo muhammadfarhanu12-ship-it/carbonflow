@@ -1,5 +1,6 @@
 const ShipmentEmissionsService = require("../services/shipmentEmissions.service");
 const EmissionRecordService = require("../services/emissionRecord.service");
+const EmissionFactorService = require("../services/emissionFactor.service");
 const EmissionImportService = require("../services/emissionImport.service");
 const AuditService = require("../services/audit.service");
 const { sendSuccess } = require("../utils/apiResponse");
@@ -39,7 +40,44 @@ exports.createActivity = async (req, res) => {
 
 exports.listFactors = async (req, res) => sendSuccess(res, {
   message: "Emission factors fetched successfully",
-  data: await EmissionRecordService.listFactors(req.query),
+  data: await EmissionFactorService.listForCompany(req.user.companyId, req.query),
+});
+
+exports.getFactor = async (req, res) => sendSuccess(res, {
+  message: "Emission factor fetched successfully",
+  data: await EmissionFactorService.getForCompany(req.params.id, req.user.companyId),
+});
+
+exports.createFactor = async (req, res) => sendSuccess(res, {
+  statusCode: 201,
+  message: "Company custom emission factor created successfully",
+  data: await EmissionFactorService.createCompanyCustom(req.body, req.user.companyId, actorFromRequest(req)),
+});
+
+exports.updateFactor = async (req, res) => sendSuccess(res, {
+  message: "Company custom emission factor updated successfully",
+  data: await EmissionFactorService.updateCompanyCustom(req.params.id, req.body, req.user.companyId, actorFromRequest(req)),
+});
+
+exports.deactivateFactor = async (req, res) => sendSuccess(res, {
+  message: "Company custom emission factor deactivated successfully",
+  data: await EmissionFactorService.deactivateCompanyCustom(req.params.id, req.user.companyId, actorFromRequest(req)),
+});
+
+exports.reactivateFactor = async (req, res) => sendSuccess(res, {
+  message: "Company custom emission factor reactivated successfully",
+  data: await EmissionFactorService.reactivateCompanyCustom(req.params.id, req.user.companyId, actorFromRequest(req)),
+});
+
+exports.previewFactorImport = async (req, res) => sendSuccess(res, {
+  message: "Emission factor import preview generated successfully",
+  data: await EmissionFactorService.previewImport(req.body.csv, { ...actorFromRequest(req), companyId: req.user.companyId }),
+});
+
+exports.commitFactorImport = async (req, res) => sendSuccess(res, {
+  statusCode: 201,
+  message: "Emission factor import saved successfully",
+  data: await EmissionFactorService.commitImport(req.body.csv, { ...actorFromRequest(req), companyId: req.user.companyId }),
 });
 
 exports.matchFactor = async (req, res) => sendSuccess(res, {

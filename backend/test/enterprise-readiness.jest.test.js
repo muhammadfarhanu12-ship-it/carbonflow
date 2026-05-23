@@ -19,6 +19,7 @@ describe("enterprise production readiness", () => {
       scope: 2,
       category: "Purchased electricity",
       activityType: "electricity",
+      factorKey: "US",
       activityUnit: "kWh",
       factorValue: 0.385,
       factorUnit: "kgCO2e/kWh",
@@ -28,6 +29,7 @@ describe("enterprise production readiness", () => {
       region: "US",
       version: "2026.1",
       isSample: false,
+      isOfficial: true,
     });
 
     expect(official.isSample).toBe(false);
@@ -42,6 +44,7 @@ describe("enterprise production readiness", () => {
       scope: 2,
       category: "Purchased electricity",
       activityType: "electricity",
+      factorKey: "GLOBAL",
       activityUnit: "kWh",
       factorValue: 0.42,
       factorUnit: "kgCO2e/kWh",
@@ -61,6 +64,7 @@ describe("enterprise production readiness", () => {
       scope: 2,
       category: "Purchased electricity",
       activityType: "electricity",
+      factorKey: "GLOBAL",
       activityUnit: "kWh",
       country: "US",
       region: "US",
@@ -324,13 +328,15 @@ describe("enterprise production readiness", () => {
       scope: 2,
       category: "Purchased electricity",
       activityType: "electricity",
+      factorKey: "GLOBAL",
       activityUnit: "kWh",
       factorValue: 0.3,
       factorUnit: "kgCO2e/kWh",
       sourceName: "Official source",
       sourceYear: 2026,
       isSample: false,
-    }, { id: "admin-1", email: "admin@example.com" });
+      isOfficial: true,
+    }, { id: "admin-1", email: "admin@example.com", role: "admin" });
 
     expect(result.id).toBe("factor-created");
     expect(EmissionFactor.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -347,6 +353,7 @@ describe("enterprise production readiness", () => {
       scope: 2,
       category: "Purchased electricity",
       activityType: "electricity",
+      factorKey: "GLOBAL",
       activityUnit: "kWh",
       factorValue: 0.4,
       value: 0.4,
@@ -355,12 +362,14 @@ describe("enterprise production readiness", () => {
       sourceName: "Official source",
       sourceYear: 2025,
       isSample: false,
+      isOfficial: true,
       toObject: () => ({
         id: "factor-edit",
         name: "Old factor",
         scope: 2,
         category: "Purchased electricity",
         activityType: "electricity",
+        factorKey: "GLOBAL",
         activityUnit: "kWh",
         factorValue: 0.4,
         value: 0.4,
@@ -369,13 +378,14 @@ describe("enterprise production readiness", () => {
         sourceName: "Official source",
         sourceYear: 2025,
         isSample: false,
+        isOfficial: true,
       }),
       save: jest.fn().mockResolvedValue(undefined),
     };
     jest.spyOn(EmissionFactor, "findById").mockResolvedValue(factor);
     const auditSpy = jest.spyOn(AuditService, "log").mockResolvedValue({});
 
-    const result = await EmissionFactorService.update("factor-edit", { name: "Updated factor", sourceYear: 2026 }, { id: "admin-1", email: "admin@example.com" });
+    const result = await EmissionFactorService.update("factor-edit", { name: "Updated factor", sourceYear: 2026 }, { id: "admin-1", email: "admin@example.com", role: "admin" });
 
     expect(result.name).toBe("Updated factor");
     expect(result.sourceYear).toBe(2026);

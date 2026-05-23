@@ -17,7 +17,7 @@ describe("buildLedgerFactorMessage", () => {
       sourceYear: 2026,
       region: "GLOBAL",
       isSample: true,
-    })).toBe("This activity uses a sample emission factor. Replace with an official factor before production use.");
+    })).toBe("This activity uses a sample emission factor. Replace with an official/custom factor before official reporting.");
   });
 
   it("shows the official/custom source message for non-sample factors", () => {
@@ -35,7 +35,8 @@ describe("buildLedgerFactorMessage", () => {
       sourceYear: 2026,
       region: "US",
       isSample: false,
-    })).toBe("Using emission factor: Utility contract 2026, 0.31 kgCO2e/kWh.");
+      isOfficial: true,
+    })).toBe("Using official emission factor: Utility contract 2026, 0.31 kgCO2e/kWh.");
   });
 
   it("shows the no-match message when no factor is found", () => {

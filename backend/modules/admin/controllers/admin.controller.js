@@ -75,6 +75,22 @@ exports.deactivateEmissionFactor = async (req, res) => sendSuccess(res, {
   data: await AdminService.deactivateEmissionFactor(req.params.id, req.admin),
 });
 
+exports.reactivateEmissionFactor = async (req, res) => sendSuccess(res, {
+  message: "Emission factor reactivated successfully",
+  data: await AdminService.reactivateEmissionFactor(req.params.id, req.admin),
+});
+
+exports.previewEmissionFactorCsv = async (req, res) => sendSuccess(res, {
+  message: "Emission factor CSV preview generated successfully",
+  data: await AdminService.previewEmissionFactorCsv(req.body.csv, { ...req.admin, companyId: req.body.companyId || req.admin?.companyId || null }),
+});
+
+exports.uploadEmissionFactorCsv = async (req, res) => sendSuccess(res, {
+  statusCode: 201,
+  message: "Emission factor CSV imported successfully",
+  data: await AdminService.uploadEmissionFactorCsv(req.body.csv, { ...req.admin, companyId: req.body.companyId || req.admin?.companyId || null }),
+});
+
 exports.getSupplierBenchmarks = async (req, res) => sendSuccess(res, {
   message: "Supplier benchmarks fetched successfully",
   data: await AdminService.listSupplierBenchmarks(req.query),

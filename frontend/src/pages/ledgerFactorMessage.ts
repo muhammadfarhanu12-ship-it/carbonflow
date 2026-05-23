@@ -15,8 +15,9 @@ export function buildLedgerFactorMessage(factor: EmissionFactor | null | undefin
   const factorUnit = factor.factorUnit || "kgCO2e/unit";
 
   if (factor.isSample !== false) {
-    return "This activity uses a sample emission factor. Replace with an official factor before production use.";
+    return "This activity uses a sample emission factor. Replace with an official/custom factor before official reporting.";
   }
 
-  return `Using emission factor: ${sourceName} ${sourceYear}, ${factorValue} ${factorUnit}.`;
+  const status = factor.isCustom ? "custom" : "official";
+  return `Using ${status} emission factor: ${sourceName} ${sourceYear}, ${factorValue} ${factorUnit}.`;
 }

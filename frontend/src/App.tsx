@@ -19,6 +19,9 @@ const OptimizationPage = lazy(async () => ({ default: (await import("./pages/Opt
 const MarketplacePage = lazy(async () => ({ default: (await import("./pages/MarketplacePage")).MarketplacePage }));
 const ReportsPage = lazy(async () => ({ default: (await import("./pages/ReportsPage")).ReportsPage }));
 const LedgerPage = lazy(async () => ({ default: (await import("./pages/LedgerPage")).LedgerPage }));
+const EmissionFactorsPage = lazy(async () => ({ default: (await import("./pages/EmissionFactorsPage")).EmissionFactorsPage }));
+const DataImportsPage = lazy(async () => ({ default: (await import("./pages/DataImportsPage")).DataImportsPage }));
+const ApprovalsPage = lazy(async () => ({ default: (await import("./pages/ApprovalsPage")).ApprovalsPage }));
 const AuditLogsPage = lazy(async () => ({ default: (await import("./pages/AuditLogsPage")).AuditLogsPage }));
 const SettingsPage = lazy(async () => ({ default: (await import("./pages/SettingsPage")).SettingsPage }));
 const SupplierQuestionnairePage = lazy(async () => ({ default: (await import("./pages/SupplierQuestionnairePage")).SupplierQuestionnairePage }));
@@ -72,9 +75,12 @@ export default function App() {
                   <Route path="shipments" element={<ShipmentsPage />} />
                   <Route path="suppliers" element={<SuppliersPage />} />
                   <Route path="ledger" element={<LedgerPage />} />
+                  <Route path="emission-factors" element={<EmissionFactorsPage />} />
+                  <Route path="imports" element={<DataImportsPage />} />
                   <Route path="optimization" element={<OptimizationPage />} />
                   <Route path="marketplace" element={<MarketplacePage />} />
                   <Route path="reports" element={<ReportsPage />} />
+                  <Route path="approvals" element={<ApprovalsPage />} />
                   <Route path="audit-logs" element={<AuditLogsPage />} />
                   <Route path="settings" element={<SettingsPage />} />
                 </Route>

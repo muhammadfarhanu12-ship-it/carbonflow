@@ -554,7 +554,7 @@ class ReportsService extends BaseService {
 
   static buildScopeCsv(report, dataset) {
     const headers = [
-      "recordId", "scope", "category", "activityType", "activityAmount", "activityUnit", "factorKey", "factorValueUsed", "factorUnitUsed", "factorSourceName", "factorSourceYear", "factorVersion", "factorIsSample", "factorIsOfficial", "formula", "kgCO2e", "tCO2e", "reportingPeriodStart", "reportingPeriodEnd", "activityDate", "facility", "businessUnit", "supplier", "shipment", "status", "calculationStatus", "createdAt", "approvedAt",
+      "recordId", "scope", "category", "activityType", "activityAmount", "activityUnit", "factorKey", "factorValueUsed", "factorUnitUsed", "factorSourceName", "factorSourceYear", "factorVersion", "factorStatus", "factorIsSample", "factorIsOfficial", "factorIsCustom", "formula", "kgCO2e", "tCO2e", "reportingPeriodStart", "reportingPeriodEnd", "activityDate", "facility", "businessUnit", "supplier", "shipment", "status", "calculationStatus", "createdAt", "approvedAt",
     ];
     return [
       csvRow(headers),
@@ -571,8 +571,10 @@ class ReportsService extends BaseService {
         record.factorSourceName || record.factorSource || "",
         record.factorSourceYear || "",
         record.factorVersion || "",
+        record.factorIsSample === true ? "sample" : record.factorIsOfficial === true ? "official" : record.factorIsCustom === true ? "custom" : "configured",
         record.factorIsSample === true,
         record.factorIsOfficial === true,
+        record.factorIsCustom === true,
         record.formula || record.activityData?.calculationFormula || "emissions = activity data x emission factor",
         record.emissionsKgCo2e ?? Number(record.amountTonnes || 0) * 1000,
         record.emissionsTCo2e ?? record.amountTonnes,
@@ -640,17 +642,20 @@ class ReportsService extends BaseService {
       ["Methodology"],
       ["Methodology Version", report.methodologyVersion || "carbonflow-methodology-v1"],
       ["Formula", "emissions = activity data x emission factor"],
-      ["Sample Factor Disclaimer", "This MVP uses sample emission factors. Replace with official factors before production use."],
+      ...(quality.sampleFactorRecords ? [["Sample Factor Disclaimer", "Sample emission factors are fallback placeholders and must be replaced with official/custom factors before official reporting."]] : []),
       ["Assurance", "Internal/unaudited. No external assurance statement is provided."],
       ["Limitations", "This report does not claim GHG Protocol, ISO, or CSRD compliance unless reviewed against required boundaries, methodology, data quality, and limitations."],
       [],
       ["Emission Activity Calculation Detail"],
-      ["Record ID", "Status", "Scope", "Category", "Formula", "kgCO2e", "tCO2e"],
+      ["Record ID", "Status", "Scope", "Category", "Factor Source", "Factor Year", "Factor Status", "Formula", "kgCO2e", "tCO2e"],
       ...dataset.emissionRecords.slice(0, 500).map((record) => [
         record._id || record.id || "",
         record.dataStatus || "draft",
         record.scope,
         record.category,
+        record.factorSourceName || record.factorSource || "",
+        record.factorSourceYear || "",
+        record.factorIsSample === true ? "sample" : record.factorIsOfficial === true ? "official" : record.factorIsCustom === true ? "custom" : "configured",
         record.formula || record.activityData?.calculationFormula || "emissions = activity data x emission factor",
         record.emissionsKgCo2e ?? Number(record.amountTonnes || 0) * 1000,
         record.emissionsTCo2e ?? record.amountTonnes,
@@ -729,6 +734,8 @@ class ReportsService extends BaseService {
       Object.entries(quality.statusSummary).forEach(([status, count]) => doc.text(`${status}: ${count}`));
       doc.text(`Missing factors: ${quality.missingFactorRecords}`);
       doc.text(`Sample factors: ${quality.sampleFactorRecords}`);
+      doc.text(`Official factors: ${dataset.emissionRecords.filter((record) => record.factorIsOfficial === true).length}`);
+      doc.text(`Custom factors: ${dataset.emissionRecords.filter((record) => record.factorIsCustom === true).length}`);
       doc.text(`Stale factors: ${quality.staleFactorRecords}`);
       doc.text(`Zero amount records: ${quality.zeroAmountRecords}`);
       doc.text(`Calculation errors: ${quality.calculationErrorRecords}`);

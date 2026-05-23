@@ -95,6 +95,7 @@ describe("enterprise audit logs", () => {
         scope: 2,
         category: "Purchased electricity",
         activityType: "electricity",
+        factorKey: "GLOBAL",
         activityUnit: "kWh",
         factorValue: 0.4,
         value: 0.4,
@@ -103,6 +104,8 @@ describe("enterprise audit logs", () => {
         sourceName: "Official source",
         sourceYear: 2025,
         isSample: false,
+        isOfficial: false,
+        isCustom: true,
       }),
       save: jest.fn().mockResolvedValue(undefined),
     };

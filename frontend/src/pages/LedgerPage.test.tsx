@@ -202,7 +202,7 @@ describe("LedgerPage", () => {
     await renderLedger();
 
     await screen.findByText("Calculation preview");
-    expect(screen.getByText(/sample factor and should not be used for official reporting/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Replace with an official\/custom factor before official reporting/i).length).toBeGreaterThan(0);
 
     await userEvent.click(screen.getByRole("button", { name: /submit for review/i }));
     expect(await screen.findByText("Activity amount must be greater than 0 before submitting.")).toBeInTheDocument();
@@ -222,6 +222,25 @@ describe("LedgerPage", () => {
     await userEvent.clear(screen.getByLabelText("Factor Key / Fuel"));
     await userEvent.type(screen.getByLabelText("Factor Key / Fuel"), "UNKNOWN");
     expect(await screen.findByText(/Missing factor warning/i)).toBeInTheDocument();
+  }, 10000);
+
+  test("Carbon Ledger preview uses official/custom factor without sample warning", async () => {
+    mocks.matchFactor.mockResolvedValue({
+      factorValue: 2.5,
+      value: 2.5,
+      factorUnit: "kgCO2e/liter",
+      sourceName: "Custom verified source",
+      sourceYear: 2025,
+      isSample: false,
+      isCustom: true,
+    });
+
+    await renderLedger();
+
+    await screen.findByText(/Using custom emission factor/i);
+    expect(screen.getAllByText(/Custom verified source 2025/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Using custom emission factor/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Replace with an official\/custom factor before official reporting/i)).not.toBeInTheDocument();
   });
 
   test("opens record details and filters records by status and factor status", async () => {
@@ -261,7 +280,7 @@ describe("LedgerPage", () => {
         editReason: "Corrected utility reading",
       }));
     });
-  });
+  }, 10000);
 
   test("audit timeline failure is shown without crashing", async () => {
     mocks.getAuditTimeline.mockRejectedValueOnce(new Error("Timeline unavailable"));

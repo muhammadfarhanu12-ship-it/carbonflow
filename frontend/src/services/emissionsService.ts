@@ -44,6 +44,8 @@ export interface EmissionFactor {
   country?: string | null;
   region: string;
   isSample: boolean;
+  isOfficial?: boolean;
+  isCustom?: boolean;
 }
 
 export interface EmissionImportPreview {

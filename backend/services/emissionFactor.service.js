@@ -4,10 +4,14 @@ const AuditService = require("./audit.service");
 function normalizeFactorPayload(payload = {}, actor = null) {
   const activityUnit = String(payload.activityUnit || payload.unit || "").trim();
   const factorValue = Number(payload.factorValue ?? payload.value);
+  const isSample = Boolean(payload.isSample);
+  const isOfficial = Boolean(payload.isOfficial);
+  const isCustom = Boolean(payload.isCustom);
+  const companyId = payload.companyId ? String(payload.companyId).trim() : actor?.companyId ? String(actor.companyId).trim() : null;
 
   return {
-    companyId: payload.companyId ? String(payload.companyId).trim() : null,
-    name: String(payload.name || "").trim(),
+    companyId,
+    name: String(payload.name || payload.factorKey || "").trim(),
     scope: Number(payload.scope),
     category: String(payload.category || "").trim(),
     activityType: String(payload.activityType || "").trim().toLowerCase(),
@@ -22,12 +26,17 @@ function normalizeFactorPayload(payload = {}, actor = null) {
     source: String(payload.source || payload.sourceName || "").trim(),
     sourceName: String(payload.sourceName || payload.source || "").trim(),
     sourceYear: Number(payload.sourceYear),
+    sourceUrl: payload.sourceUrl ? String(payload.sourceUrl).trim() : null,
+    methodology: payload.methodology ? String(payload.methodology).trim() : null,
+    notes: payload.notes ? String(payload.notes).trim() : null,
     country: payload.country ? String(payload.country).trim().toUpperCase() : null,
     region: String(payload.region || "GLOBAL").trim().toUpperCase(),
     version: String(payload.version || "v1").trim(),
     effectiveFrom: payload.effectiveFrom ? new Date(payload.effectiveFrom) : null,
     effectiveTo: payload.effectiveTo ? new Date(payload.effectiveTo) : null,
-    isSample: Boolean(payload.isSample),
+    isSample,
+    isOfficial,
+    isCustom,
     isActive: payload.isActive !== undefined ? Boolean(payload.isActive) : true,
     updatedBy: actor?.id || null,
   };
@@ -57,9 +66,16 @@ function parseVersionNumber(value) {
 }
 
 function isOfficialOrCustomFactor(factor = {}) {
-  return factor.isSample === false
+  return factor.isSample === false && (factor.isOfficial === true || factor.isCustom === true || Boolean(factor.companyId))
     && Boolean(String(factor.sourceName || factor.source || "").trim())
     && Number.isInteger(Number(factor.sourceYear));
+}
+
+function factorKind(factor = {}) {
+  if (factor.isSample !== false) return "sample";
+  if (factor.isCustom === true || Boolean(String(factor.companyId || "").trim())) return "custom";
+  if (factor.isOfficial === true || !factor.companyId) return "official";
+  return "configured";
 }
 
 function scoreFactor(factor = {}, criteria = {}) {
@@ -113,7 +129,23 @@ function selectBestMatchingFactor(factors = [], criteria = {}) {
     return null;
   }
 
-  return eligible
+  const companyId = String(criteria.companyId || "").trim();
+  const companyCustom = eligible.filter((factor) => (
+    factor.isActive !== false
+    && factor.isSample === false
+    && (factor.isCustom === true || Boolean(factor.companyId))
+    && String(factor.companyId || "").trim() === companyId
+  ));
+  const officialGlobal = eligible.filter((factor) => (
+    factor.isActive !== false
+    && factor.isSample === false
+    && (factor.isOfficial === true || !factor.companyId)
+    && !String(factor.companyId || "").trim()
+  ));
+  const sampleFallback = eligible.filter((factor) => factor.isSample !== false);
+  const prioritized = companyCustom.length ? companyCustom : officialGlobal.length ? officialGlobal : sampleFallback;
+
+  return prioritized
     .map((factor) => ({ factor, score: scoreFactor(factor, criteria) }))
     .sort((left, right) => {
       if (right.score !== left.score) return right.score - left.score;
@@ -132,8 +164,9 @@ function validateFactorPayload(payload = {}) {
   if (![1, 2, 3].includes(normalized.scope)) errors.push("scope must be 1, 2, or 3");
   if (!normalized.category) errors.push("category is required");
   if (!normalized.activityType) errors.push("activityType is required");
+  if (!normalized.factorKey) errors.push("factorKey is required");
   if (!normalized.activityUnit) errors.push("activityUnit is required");
-  if (!Number.isFinite(normalized.factorValue) || normalized.factorValue < 0) errors.push("factorValue must be a non-negative number");
+  if (!Number.isFinite(normalized.factorValue) || normalized.factorValue <= 0) errors.push("factorValue must be greater than 0");
   if (!normalized.factorUnit) errors.push("factorUnit is required");
   if (!normalized.sourceName) errors.push("sourceName is required");
   if (!Number.isInteger(normalized.sourceYear) || normalized.sourceYear < 1900) errors.push("sourceYear must be a valid year");
@@ -142,6 +175,11 @@ function validateFactorPayload(payload = {}) {
   if (normalized.effectiveFrom && normalized.effectiveTo && normalized.effectiveTo < normalized.effectiveFrom) {
     errors.push("effectiveTo must be after effectiveFrom");
   }
+  if (normalized.isSample && normalized.isOfficial) errors.push("sample factors cannot be official");
+  if (normalized.isSample && normalized.isCustom) errors.push("sample factors cannot be custom");
+  if (!normalized.isSample && !normalized.isOfficial && !normalized.isCustom) errors.push("non-sample factors must be marked official or custom");
+  if (normalized.isCustom && !normalized.companyId) errors.push("custom factors must be scoped to a companyId");
+  if (normalized.isOfficial && normalized.companyId) errors.push("official factors must be global; use custom for company-scoped factors");
 
   if (errors.length) {
     const error = new Error(errors.join("; "));
@@ -150,6 +188,79 @@ function validateFactorPayload(payload = {}) {
   }
 
   return normalized;
+}
+
+function actorCanManageGlobalOfficial(actor = null) {
+  const role = String(actor?.role || "").toLowerCase();
+  return ["superadmin", "admin", "owner"].includes(role);
+}
+
+function parseCsvLine(line) {
+  const cells = [];
+  let current = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+    if (char === "\"" && quoted && next === "\"") {
+      current += "\"";
+      index += 1;
+    } else if (char === "\"") {
+      quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      cells.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  cells.push(current);
+  return cells.map((cell) => cell.trim());
+}
+
+function parseBoolean(value) {
+  return ["true", "1", "yes", "y"].includes(String(value || "").trim().toLowerCase());
+}
+
+function parseFactorCsv(csv = "") {
+  const lines = String(csv || "").split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length < 2) return [];
+  const headers = parseCsvLine(lines[0]).map((header) => header.trim());
+  return lines.slice(1).map((line, index) => {
+    const cells = parseCsvLine(line);
+    const raw = headers.reduce((row, header, cellIndex) => {
+      row[header] = cells[cellIndex] ?? "";
+      return row;
+    }, {});
+    return {
+      rowNumber: index + 2,
+      raw,
+      payload: {
+        ...raw,
+        scope: Number(raw.scope),
+        factorValue: Number(raw.factorValue),
+        sourceYear: Number(raw.sourceYear),
+        isOfficial: parseBoolean(raw.isOfficial),
+        isCustom: parseBoolean(raw.isCustom),
+        isSample: false,
+      },
+    };
+  });
+}
+
+function duplicateKeyFor(payload = {}) {
+  return [
+    payload.companyId || "",
+    payload.scope || "",
+    String(payload.category || "").trim().toLowerCase(),
+    String(payload.activityType || "").trim().toLowerCase(),
+    String(payload.factorKey || "").trim().toUpperCase(),
+    String(payload.activityUnit || "").trim().toLowerCase(),
+    String(payload.country || "").trim().toUpperCase(),
+    String(payload.region || "GLOBAL").trim().toUpperCase(),
+    payload.sourceYear || "",
+    String(payload.version || "v1").trim().toLowerCase(),
+  ].join("|");
 }
 
 class EmissionFactorService {
@@ -200,6 +311,8 @@ class EmissionFactorService {
     if (query.companyId) filter.companyId = query.companyId;
     if (query.region) filter.region = String(query.region).toUpperCase();
     if (query.isSample !== undefined) filter.isSample = String(query.isSample) === "true";
+    if (query.isOfficial !== undefined) filter.isOfficial = String(query.isOfficial) === "true";
+    if (query.isCustom !== undefined) filter.isCustom = String(query.isCustom) === "true";
     if (query.isActive !== undefined) filter.isActive = String(query.isActive) === "true";
     if (query.search) {
       filter.$or = ["name", "category", "activityType", "factorKey", "sourceName"].map((field) => ({
@@ -225,8 +338,119 @@ class EmissionFactorService {
     };
   }
 
+  static async listForCompany(companyId, query = {}) {
+    const scopedQuery = { ...query };
+    const filter = {
+      $or: [{ companyId }, { companyId: null }, { companyId: "" }],
+    };
+    if (scopedQuery.scope) filter.scope = Number(scopedQuery.scope);
+    if (scopedQuery.category) filter.category = { $regex: scopedQuery.category, $options: "i" };
+    if (scopedQuery.activityType) filter.activityType = String(scopedQuery.activityType).trim().toLowerCase();
+    if (scopedQuery.factorKey) filter.factorKey = String(scopedQuery.factorKey).trim().replace(/[\s-]+/g, "_").toUpperCase();
+    if (scopedQuery.source || scopedQuery.sourceName) filter.sourceName = { $regex: scopedQuery.source || scopedQuery.sourceName, $options: "i" };
+    if (scopedQuery.sourceYear) filter.sourceYear = Number(scopedQuery.sourceYear);
+    if (scopedQuery.country) filter.country = String(scopedQuery.country).toUpperCase();
+    if (scopedQuery.region) filter.region = String(scopedQuery.region).toUpperCase();
+    if (scopedQuery.isSample !== undefined) filter.isSample = String(scopedQuery.isSample) === "true";
+    if (scopedQuery.isOfficial !== undefined) filter.isOfficial = String(scopedQuery.isOfficial) === "true";
+    if (scopedQuery.isCustom !== undefined) filter.isCustom = String(scopedQuery.isCustom) === "true";
+    if (scopedQuery.isActive !== undefined) filter.isActive = String(scopedQuery.isActive) === "true";
+    if (scopedQuery.search) {
+      filter.$and = [
+        { $or: filter.$or },
+        {
+          $or: ["name", "category", "activityType", "factorKey", "sourceName", "methodology"].map((field) => ({
+            [field]: { $regex: String(scopedQuery.search), $options: "i" },
+          })),
+        },
+      ];
+      delete filter.$or;
+    }
+
+    const pageSize = Math.min(Math.max(Number(scopedQuery.pageSize || 50), 1), 100);
+    const page = Math.max(Number(scopedQuery.page || 1), 1);
+    const [data, total] = await Promise.all([
+      EmissionFactor.find(filter).sort({ isActive: -1, isCustom: -1, isOfficial: -1, isSample: 1, scope: 1, category: 1, sourceYear: -1 }).skip((page - 1) * pageSize).limit(pageSize).lean(),
+      EmissionFactor.countDocuments(filter),
+    ]);
+
+    return {
+      data: data.map((factor) => ({ id: factor._id, ...factor, factorStatus: factorKind(factor), canEdit: factor.isCustom === true && String(factor.companyId || "") === String(companyId) })),
+      pagination: {
+        page,
+        pageSize,
+        total,
+        totalPages: Math.max(Math.ceil(total / pageSize), 1),
+      },
+    };
+  }
+
+  static async getForCompany(id, companyId) {
+    const factor = await EmissionFactor.findOne({
+      _id: id,
+      $or: [{ companyId }, { companyId: null }, { companyId: "" }],
+    }).lean();
+    if (!factor) {
+      const error = new Error("Emission factor not found");
+      error.status = 404;
+      throw error;
+    }
+    return { id: factor._id, ...factor, factorStatus: factorKind(factor), canEdit: factor.isCustom === true && String(factor.companyId || "") === String(companyId) };
+  }
+
+  static async createCompanyCustom(payload, companyId, actor = null) {
+    return this.create({
+      ...payload,
+      companyId,
+      isSample: false,
+      isOfficial: false,
+      isCustom: true,
+    }, { ...actor, companyId });
+  }
+
+  static async updateCompanyCustom(id, payload, companyId, actor = null) {
+    const existing = await EmissionFactor.findOne({ _id: id, companyId, isCustom: true });
+    if (!existing) {
+      const error = new Error("Only company custom emission factors can be edited here");
+      error.status = 403;
+      throw error;
+    }
+    return this.update(id, {
+      ...payload,
+      companyId,
+      isSample: false,
+      isOfficial: false,
+      isCustom: true,
+    }, { ...actor, companyId });
+  }
+
+  static async deactivateCompanyCustom(id, companyId, actor = null) {
+    const factor = await EmissionFactor.findOne({ _id: id, companyId, isCustom: true });
+    if (!factor) {
+      const error = new Error("Only company custom emission factors can be deactivated here");
+      error.status = 403;
+      throw error;
+    }
+    return this.deactivate(id, { ...actor, companyId });
+  }
+
+  static async reactivateCompanyCustom(id, companyId, actor = null) {
+    const factor = await EmissionFactor.findOne({ _id: id, companyId, isCustom: true });
+    if (!factor) {
+      const error = new Error("Only company custom emission factors can be reactivated here");
+      error.status = 403;
+      throw error;
+    }
+    return this.reactivate(id, { ...actor, companyId });
+  }
+
   static async create(payload, actor = null) {
     const normalized = validateFactorPayload(payload);
+    if (normalized.isOfficial && !normalized.companyId && !actorCanManageGlobalOfficial(actor)) {
+      const error = new Error("admin or superadmin permission is required for official global factors");
+      error.status = 403;
+      throw error;
+    }
     const factor = await EmissionFactor.create({
       ...normalized,
       createdBy: actor?.id || null,
@@ -261,6 +485,11 @@ class EmissionFactorService {
       factorValue: payload.factorValue ?? oldValue.factorValue ?? oldValue.value,
       sourceName: payload.sourceName ?? oldValue.sourceName ?? oldValue.source,
     });
+    if (normalized.isOfficial && !normalized.companyId && !actorCanManageGlobalOfficial(actor)) {
+      const error = new Error("admin or superadmin permission is required for official global factors");
+      error.status = 403;
+      throw error;
+    }
     Object.assign(factor, normalized);
     await factor.save();
 
@@ -305,9 +534,145 @@ class EmissionFactorService {
     });
     return factor;
   }
+
+  static async reactivate(id, actor = null) {
+    const factor = await EmissionFactor.findById(id);
+    if (!factor) {
+      const error = new Error("Emission factor not found");
+      error.status = 404;
+      throw error;
+    }
+
+    const oldValue = factor.toObject();
+    factor.isActive = true;
+    factor.updatedBy = actor?.id || null;
+    await factor.save();
+    await AuditService.log({
+      companyId: factor.companyId || actor?.companyId || null,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      action: "emission_factor_reactivated",
+      entityType: "EmissionFactor",
+      entityId: factor.id,
+      ipAddress: actor?.ipAddress || null,
+      userAgent: actor?.userAgent || null,
+      oldValue,
+      newValue: factor.toObject(),
+    });
+    return factor;
+  }
+
+  static async previewImport(csv, actor = null) {
+    const rows = parseFactorCsv(csv);
+    if (rows.length === 0) {
+      return {
+        totalRows: 0,
+        validRows: 0,
+        invalidRows: 0,
+        duplicateWarnings: 0,
+        rows: [],
+        validRowItems: [],
+        invalidRowItems: [],
+      };
+    }
+    const payloadKeys = rows.map((row) => duplicateKeyFor(row.payload));
+    const rowKeyCounts = payloadKeys.reduce((counts, key) => {
+      counts[key] = (counts[key] || 0) + 1;
+      return counts;
+    }, {});
+    const existing = await EmissionFactor.find({
+      $or: rows.map((row) => ({
+        companyId: row.payload.companyId || null,
+        scope: Number(row.payload.scope),
+        category: { $regex: `^${escapeRegex(row.payload.category || "")}$`, $options: "i" },
+        activityType: String(row.payload.activityType || "").trim().toLowerCase(),
+        factorKey: String(row.payload.factorKey || "").trim().replace(/[\s-]+/g, "_").toUpperCase(),
+        activityUnit: String(row.payload.activityUnit || "").trim(),
+        sourceYear: Number(row.payload.sourceYear),
+      })),
+    }).lean();
+    const existingKeys = new Set(existing.map(duplicateKeyFor));
+
+    const previewRows = rows.map((row) => {
+      const errors = [];
+      let normalized = null;
+      try {
+        normalized = validateFactorPayload({
+          ...row.payload,
+          companyId: row.payload.companyId || actor?.companyId || null,
+        });
+        if (normalized.isOfficial && !normalized.companyId && !actorCanManageGlobalOfficial(actor)) {
+          errors.push("admin or superadmin permission is required for official global factors");
+        }
+      } catch (error) {
+        errors.push(...String(error.message || "Invalid row").split("; "));
+      }
+      const key = duplicateKeyFor(normalized || row.payload);
+      const warnings = [
+        rowKeyCounts[key] > 1 ? "Duplicate row in CSV import." : null,
+        existingKeys.has(key) ? "A similar emission factor already exists." : null,
+      ].filter(Boolean);
+      return {
+        rowNumber: row.rowNumber,
+        valid: errors.length === 0,
+        errors,
+        warnings,
+        payload: normalized || row.payload,
+      };
+    });
+
+    return {
+      totalRows: previewRows.length,
+      validRows: previewRows.filter((row) => row.valid).length,
+      invalidRows: previewRows.filter((row) => !row.valid).length,
+      duplicateWarnings: previewRows.filter((row) => row.warnings.length > 0).length,
+      rows: previewRows,
+      validRowItems: previewRows.filter((row) => row.valid),
+      invalidRowItems: previewRows.filter((row) => !row.valid),
+    };
+  }
+
+  static async commitImport(csv, actor = null) {
+    const preview = await this.previewImport(csv, actor);
+    const validRows = preview.rows.filter((row) => row.valid);
+    const created = [];
+    for (const row of validRows) {
+      const factor = await EmissionFactor.create({
+        ...row.payload,
+        createdBy: actor?.id || null,
+        updatedBy: actor?.id || null,
+      });
+      created.push(factor);
+    }
+
+    await AuditService.log({
+      companyId: actor?.companyId || null,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      action: "emission_factor_imported",
+      entityType: "EmissionFactor",
+      entityId: "csv-import",
+      ipAddress: actor?.ipAddress || null,
+      userAgent: actor?.userAgent || null,
+      details: {
+        totalRows: preview.totalRows,
+        createdCount: created.length,
+        invalidRows: preview.invalidRows,
+        duplicateWarnings: preview.duplicateWarnings,
+      },
+      newValue: created.map((factor) => factor.toObject()),
+    });
+
+    return {
+      ...preview,
+      createdCount: created.length,
+      data: created.map((factor) => factor.toJSON()),
+    };
+  }
 }
 
 module.exports = EmissionFactorService;
 module.exports.validateFactorPayload = validateFactorPayload;
 module.exports.isOfficialOrCustomFactor = isOfficialOrCustomFactor;
 module.exports.selectBestMatchingFactor = selectBestMatchingFactor;
+module.exports.factorKind = factorKind;
