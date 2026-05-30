@@ -10,8 +10,10 @@ router.use(authenticate);
 
 router.get("/summary", requirePermission("approvals:view"), asyncHandler(controller.summary));
 router.get("/", requirePermission("approvals:view"), asyncHandler(controller.list));
+router.get("/:type/:id", requirePermission("approvals:view"), asyncHandler(controller.get));
 router.post("/:type/:id/approve", requirePermission("approvals:view"), asyncHandler(controller.approve));
 router.post("/:type/:id/reject", requirePermission("approvals:view"), asyncHandler(controller.reject));
 router.post("/:type/:id/request-correction", requirePermission("approvals:view"), asyncHandler(controller.requestCorrection));
+router.post("/:type/:id/assign", requirePermission("approvals:assign"), asyncHandler(controller.assign));
 
 module.exports = router;

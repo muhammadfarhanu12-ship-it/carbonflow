@@ -24,9 +24,17 @@ const PERMISSIONS = [
   "supplier:audit:view",
   "factor:view",
   "factor:manage",
+  "factor:import",
+  "factor:audit:view",
+  "shipment:create",
   "import:view",
   "import:create",
+  "import:commit",
+  "import:error_report:download",
+  "import:review",
   "approvals:view",
+  "approvals:assign",
+  "approvals:bulk_action",
   "emission:view",
   "emission:create",
   "emission:update",
@@ -54,6 +62,8 @@ const PERMISSIONS = [
   "marketplace:checkout",
   "marketplace:budget:request",
   "marketplace:budget:manage",
+  "marketplace:payment:verify",
+  "marketplace:registry:verify",
   "marketplace:certificate:view",
   "marketplace:auto_offset:manage",
   "settings:view",
@@ -65,6 +75,8 @@ const PERMISSIONS = [
   "settings:api_keys:manage",
   "settings:integrations:manage",
   "user:manage",
+  "factor:approve",
+  "report:approve",
 ];
 
 const ROLE_PERMISSIONS = {
@@ -81,9 +93,16 @@ const ROLE_PERMISSIONS = {
     "supplier:evidence:verify",
     "factor:view",
     "factor:manage",
+    "factor:import",
+    "factor:audit:view",
+    "shipment:create",
     "import:view",
     "import:create",
+    "import:commit",
+    "import:error_report:download",
+    "import:review",
     "approvals:view",
+    "approvals:assign",
     "report:generate",
     "report:view",
     "report:download",
@@ -119,8 +138,11 @@ const ROLE_PERMISSIONS = {
     "settings:security:update",
     "settings:api_keys:manage",
     "settings:integrations:manage",
+    "marketplace:payment:verify",
+    "marketplace:registry:verify",
+    "factor:approve",
   ],
-  data_entry: ["supplier:view", "supplier:create", "supplier:update", "supplier:evidence:view", "report:view", "emission:view", "emission:create", "emission:update", "emission:submit", "import:view", "import:create", "records:create", "records:edit", "optimization:view", "marketplace:view", "settings:view", "settings:profile:update", "settings:security:update"],
+  data_entry: ["supplier:view", "supplier:create", "supplier:update", "supplier:evidence:view", "shipment:create", "report:view", "emission:view", "emission:create", "emission:update", "emission:submit", "import:view", "import:create", "import:commit", "records:create", "records:edit", "optimization:view", "marketplace:view", "settings:view", "settings:profile:update", "settings:security:update"],
   viewer: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "report:view", "emission:view", "factor:view", "import:view", "optimization:view", "marketplace:view", "settings:view"],
   auditor: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "supplier:audit:view", "report:view", "report:download", "emission:view", "factor:view", "import:view", "approvals:view", "audit:view", "audit:export", "optimization:view", "marketplace:view", "marketplace:certificate:view", "settings:view"],
 };
@@ -179,6 +201,16 @@ function requirePermission(permission) {
   };
 }
 
+function requireAnyPermission(permissions = []) {
+  return (req, _res, next) => {
+    if (!permissions.some((permission) => hasPermission(req.user, permission))) {
+      return next(new ApiError(403, `Permission denied: ${permissions.join(" or ")}`));
+    }
+
+    return next();
+  };
+}
+
 module.exports = {
   CUSTOM_POLICY_DEFAULTS,
   LEGACY_PERMISSION_ALIASES,
@@ -188,5 +220,6 @@ module.exports = {
   normalizeRole,
   normalizePermission,
   requirePermission,
+  requireAnyPermission,
   resolveUserPermissions,
 };

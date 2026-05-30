@@ -376,7 +376,11 @@ function calculateActivityEmission(input = {}, factor = null) {
     factorCountry: factor?.country || input.country || null,
     factorVersion: factor?.version || input.factorVersion || null,
     factorIsSample: factor?.isSample ?? true,
-    factorIsOfficial: factor?.isSample === false && (factor?.isOfficial === true || !factor?.companyId),
+    factorIsOfficial: factor?.isSample === false
+      && factor?.isOfficial === true
+      && !factor?.companyId
+      && Boolean(factor?.sourceName || factor?.source)
+      && Number.isInteger(Number(factor?.sourceYear)),
     factorIsCustom: factor?.isSample === false && (factor?.isCustom === true || Boolean(factor?.companyId)),
     emissionFactorId: factor?._id || factor?.id || null,
     formula: "emissions = activityAmount x emissionFactor",

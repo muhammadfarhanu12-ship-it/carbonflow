@@ -12,9 +12,17 @@ export type Permission =
   | "supplier:audit:view"
   | "factor:view"
   | "factor:manage"
+  | "factor:import"
+  | "factor:audit:view"
+  | "shipment:create"
   | "import:view"
   | "import:create"
+  | "import:commit"
+  | "import:error_report:download"
+  | "import:review"
   | "approvals:view"
+  | "approvals:assign"
+  | "approvals:bulk_action"
   | "emission:view"
   | "emission:create"
   | "emission:update"
@@ -37,6 +45,8 @@ export type Permission =
   | "marketplace:view"
   | "marketplace:checkout"
   | "marketplace:budget:manage"
+  | "marketplace:payment:verify"
+  | "marketplace:registry:verify"
   | "settings:view"
   | "settings:profile:update"
   | "settings:organization:update"
@@ -45,7 +55,9 @@ export type Permission =
   | "settings:security:update"
   | "settings:api_keys:manage"
   | "settings:integrations:manage"
-  | "user:manage";
+  | "user:manage"
+  | "factor:approve"
+  | "report:approve";
 
 const ROLE_ALIASES: Record<string, string> = {
   SUPERADMIN: "owner",
@@ -71,9 +83,17 @@ const ALL_PERMISSIONS: Permission[] = [
   "supplier:audit:view",
   "factor:view",
   "factor:manage",
+  "factor:import",
+  "factor:audit:view",
+  "shipment:create",
   "import:view",
   "import:create",
+  "import:commit",
+  "import:error_report:download",
+  "import:review",
   "approvals:view",
+  "approvals:assign",
+  "approvals:bulk_action",
   "emission:view",
   "emission:create",
   "emission:update",
@@ -96,6 +116,8 @@ const ALL_PERMISSIONS: Permission[] = [
   "marketplace:view",
   "marketplace:checkout",
   "marketplace:budget:manage",
+  "marketplace:payment:verify",
+  "marketplace:registry:verify",
   "settings:view",
   "settings:profile:update",
   "settings:organization:update",
@@ -105,6 +127,8 @@ const ALL_PERMISSIONS: Permission[] = [
   "settings:api_keys:manage",
   "settings:integrations:manage",
   "user:manage",
+  "factor:approve",
+  "report:approve",
 ];
 
 const ROLE_PERMISSIONS: Record<string, Permission[]> = {
@@ -121,9 +145,16 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "supplier:evidence:verify",
     "factor:view",
     "factor:manage",
+    "factor:import",
+    "factor:audit:view",
+    "shipment:create",
     "import:view",
     "import:create",
+    "import:commit",
+    "import:error_report:download",
+    "import:review",
     "approvals:view",
+    "approvals:assign",
     "report:generate",
     "report:view",
     "report:download",
@@ -145,6 +176,9 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "marketplace:view",
     "marketplace:checkout",
     "marketplace:budget:manage",
+    "marketplace:payment:verify",
+    "marketplace:registry:verify",
+    "factor:approve",
     "settings:view",
     "settings:profile:update",
     "settings:organization:update",
@@ -154,9 +188,9 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "settings:api_keys:manage",
     "settings:integrations:manage",
   ],
-  data_entry: ["supplier:view", "supplier:create", "supplier:update", "supplier:evidence:view", "report:view", "emission:view", "emission:create", "emission:update", "emission:submit", "import:view", "import:create", "optimization:view", "marketplace:view", "settings:view", "settings:profile:update", "settings:security:update"],
+  data_entry: ["supplier:view", "supplier:create", "supplier:update", "supplier:evidence:view", "shipment:create", "report:view", "emission:view", "emission:create", "emission:update", "emission:submit", "import:view", "import:create", "import:commit", "optimization:view", "marketplace:view", "settings:view", "settings:profile:update", "settings:security:update"],
   viewer: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "report:view", "emission:view", "factor:view", "import:view", "optimization:view", "marketplace:view", "settings:view"],
-  auditor: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "supplier:audit:view", "report:view", "report:download", "emission:view", "factor:view", "import:view", "approvals:view", "audit:view", "audit:export", "optimization:view", "marketplace:view", "settings:view"],
+  auditor: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "supplier:audit:view", "factor:audit:view", "report:view", "report:download", "emission:view", "factor:view", "import:view", "approvals:view", "audit:view", "audit:export", "optimization:view", "marketplace:view", "settings:view"],
 };
 
 export const NO_PERMISSION_MESSAGE = "You do not have permission to perform this action.";
@@ -168,5 +202,8 @@ export function normalizeRole(role?: string | null) {
 
 export function hasPermission(user: SessionUser | null | undefined, permission: Permission) {
   const role = normalizeRole(user?.role);
-  return Boolean(ROLE_PERMISSIONS[role]?.includes(permission));
+  const customPermissions = Array.isArray((user as SessionUser & { permissions?: string[] } | null | undefined)?.permissions)
+    ? ((user as SessionUser & { permissions?: string[] }).permissions || [])
+    : [];
+  return Boolean(ROLE_PERMISSIONS[role]?.includes(permission) || customPermissions.includes(permission));
 }

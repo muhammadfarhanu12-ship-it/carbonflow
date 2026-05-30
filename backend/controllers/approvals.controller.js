@@ -16,7 +16,7 @@ exports.summary = async (req, res) => sendSuccess(res, {
 });
 
 exports.list = async (req, res) => {
-  const data = await ApprovalsService.list(req.user.companyId, req.query);
+  const data = await ApprovalsService.list(req.user.companyId, req.query, actorFromRequest(req));
   await AuditService.logForRequest(req, {
     action: "approval_queue_viewed",
     entityType: "ApprovalQueue",
@@ -28,6 +28,11 @@ exports.list = async (req, res) => {
     data,
   });
 };
+
+exports.get = async (req, res) => sendSuccess(res, {
+  message: "Approval item fetched successfully",
+  data: await ApprovalsService.get(req.params.type, req.params.id, req.user.companyId, actorFromRequest(req)),
+});
 
 exports.approve = async (req, res) => sendSuccess(res, {
   message: "Approval item approved successfully",
@@ -42,4 +47,9 @@ exports.reject = async (req, res) => sendSuccess(res, {
 exports.requestCorrection = async (req, res) => sendSuccess(res, {
   message: "Approval correction requested successfully",
   data: await ApprovalsService.requestCorrection(req.params.type, req.params.id, req.user.companyId, actorFromRequest(req), req.body),
+});
+
+exports.assign = async (req, res) => sendSuccess(res, {
+  message: "Approval assignment updated successfully",
+  data: await ApprovalsService.assign(req.params.type, req.params.id, req.user.companyId, actorFromRequest(req), req.body),
 });

@@ -71,7 +71,7 @@ exports.reactivateFactor = async (req, res) => sendSuccess(res, {
 
 exports.previewFactorImport = async (req, res) => sendSuccess(res, {
   message: "Emission factor import preview generated successfully",
-  data: await EmissionFactorService.previewImport(req.body.csv, { ...actorFromRequest(req), companyId: req.user.companyId }),
+  data: await EmissionFactorService.previewCompanyImport(req.body.csv, { ...actorFromRequest(req), companyId: req.user.companyId }),
 });
 
 exports.commitFactorImport = async (req, res) => sendSuccess(res, {

@@ -1,7 +1,7 @@
 const express = require("express");
 const asyncHandler = require("../middleware/asyncHandler");
 const { authenticate } = require("../middleware/auth");
-const { requirePermission } = require("../middlewares/rbac");
+const { requireAnyPermission, requirePermission } = require("../middlewares/rbac");
 const controller = require("../controllers/shipmentEmissions.controller");
 
 const router = express.Router();
@@ -10,8 +10,8 @@ router.use(authenticate);
 
 router.get("/", requirePermission("emission:view"), asyncHandler(controller.listActivities));
 router.get("/factors/match", requirePermission("emission:view"), asyncHandler(controller.matchFactor));
-router.post("/factors/preview-import", requirePermission("import:create"), asyncHandler(controller.previewFactorImport));
-router.post("/factors/import", requirePermission("import:create"), asyncHandler(controller.commitFactorImport));
+router.post("/factors/preview-import", requireAnyPermission(["factor:import", "factor:manage"]), asyncHandler(controller.previewFactorImport));
+router.post("/factors/import", requireAnyPermission(["factor:import", "factor:manage"]), asyncHandler(controller.commitFactorImport));
 router.get("/factors", requirePermission("factor:view"), asyncHandler(controller.listFactors));
 router.post("/factors", requirePermission("factor:manage"), asyncHandler(controller.createFactor));
 router.get("/factors/:id", requirePermission("factor:view"), asyncHandler(controller.getFactor));

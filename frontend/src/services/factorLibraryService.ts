@@ -29,6 +29,7 @@ export interface ManagedEmissionFactor {
   isCustom: boolean;
   isActive: boolean;
   canEdit?: boolean;
+  factorStatus?: "custom" | "official" | "sample" | "configured";
 }
 
 export type FactorPayload = Partial<ManagedEmissionFactor> & {
@@ -58,8 +59,19 @@ export interface FactorImportPreview {
   }>;
 }
 
+export interface FactorLibrarySummary {
+  customFactors: number;
+  officialFactors: number;
+  sampleFactors: number;
+  missingFactorsReferenced: number;
+}
+
+export interface FactorLibraryResponse extends PaginatedResponse<ManagedEmissionFactor> {
+  summary?: FactorLibrarySummary;
+}
+
 export const factorLibraryService = {
-  list: (params = "") => apiClient.get<PaginatedResponse<ManagedEmissionFactor>>(`/emissions/factors${params}`),
+  list: (params = "") => apiClient.get<FactorLibraryResponse>(`/emissions/factors${params}`),
   get: (id: string) => apiClient.get<ManagedEmissionFactor>(`/emissions/factors/${id}`),
   create: (payload: FactorPayload) => apiClient.post<ManagedEmissionFactor>("/emissions/factors", payload),
   update: (id: string, payload: Partial<FactorPayload>) => apiClient.patch<ManagedEmissionFactor>(`/emissions/factors/${id}`, payload),

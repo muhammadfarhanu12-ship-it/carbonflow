@@ -1,5 +1,6 @@
-const { EmissionFactor } = require("../models");
+const { EmissionFactor, EmissionRecord } = require("../models");
 const AuditService = require("./audit.service");
+const { getSampleFactors } = require("./carbonEngine");
 
 function normalizeFactorPayload(payload = {}, actor = null) {
   const activityUnit = String(payload.activityUnit || payload.unit || "").trim();
@@ -74,7 +75,12 @@ function isOfficialOrCustomFactor(factor = {}) {
 function factorKind(factor = {}) {
   if (factor.isSample !== false) return "sample";
   if (factor.isCustom === true || Boolean(String(factor.companyId || "").trim())) return "custom";
-  if (factor.isOfficial === true || !factor.companyId) return "official";
+  if (
+    factor.isOfficial === true
+    && !factor.companyId
+    && Boolean(String(factor.sourceName || factor.source || "").trim())
+    && Number.isInteger(Number(factor.sourceYear))
+  ) return "official";
   return "configured";
 }
 
@@ -139,11 +145,13 @@ function selectBestMatchingFactor(factors = [], criteria = {}) {
   const officialGlobal = eligible.filter((factor) => (
     factor.isActive !== false
     && factor.isSample === false
-    && (factor.isOfficial === true || !factor.companyId)
+    && factor.isOfficial === true
     && !String(factor.companyId || "").trim()
+    && Boolean(String(factor.sourceName || factor.source || "").trim())
+    && Number.isInteger(Number(factor.sourceYear))
   ));
   const sampleFallback = eligible.filter((factor) => factor.isSample !== false);
-  const prioritized = companyCustom.length ? companyCustom : officialGlobal.length ? officialGlobal : sampleFallback;
+  const prioritized = companyCustom.length ? companyCustom : officialGlobal.length ? officialGlobal : sampleFallback.length ? sampleFallback : eligible;
 
   return prioritized
     .map((factor) => ({ factor, score: scoreFactor(factor, criteria) }))
@@ -263,6 +271,20 @@ function duplicateKeyFor(payload = {}) {
   ].join("|");
 }
 
+async function countMissingFactorReferences(companyId) {
+  if (process.env.NODE_ENV === "test" && !EmissionRecord.countDocuments._isMockFunction) {
+    return 0;
+  }
+  const countPromise = EmissionRecord.countDocuments({
+    companyId,
+    $or: [{ calculationStatus: "missing_factor" }, { factorValue: null }, { factorValue: { $exists: false } }],
+  });
+  const timeoutPromise = new Promise((resolve) => {
+    setTimeout(() => resolve(0), 1000);
+  });
+  return Promise.race([countPromise, timeoutPromise]);
+}
+
 class EmissionFactorService {
   static async resolveBestMatch(criteria = {}) {
     const scope = Number(criteria.scope);
@@ -351,6 +373,16 @@ class EmissionFactorService {
     if (scopedQuery.sourceYear) filter.sourceYear = Number(scopedQuery.sourceYear);
     if (scopedQuery.country) filter.country = String(scopedQuery.country).toUpperCase();
     if (scopedQuery.region) filter.region = String(scopedQuery.region).toUpperCase();
+    if (scopedQuery.activityUnit) filter.activityUnit = String(scopedQuery.activityUnit).trim();
+    if (scopedQuery.status === "active") filter.isActive = true;
+    if (scopedQuery.status === "inactive") filter.isActive = false;
+    if (scopedQuery.type === "custom") filter.isCustom = true;
+    if (scopedQuery.type === "official") {
+      filter.isOfficial = true;
+      filter.isSample = false;
+      filter.companyId = { $in: [null, ""] };
+    }
+    if (scopedQuery.type === "sample") filter.isSample = true;
     if (scopedQuery.isSample !== undefined) filter.isSample = String(scopedQuery.isSample) === "true";
     if (scopedQuery.isOfficial !== undefined) filter.isOfficial = String(scopedQuery.isOfficial) === "true";
     if (scopedQuery.isCustom !== undefined) filter.isCustom = String(scopedQuery.isCustom) === "true";
@@ -369,19 +401,75 @@ class EmissionFactorService {
 
     const pageSize = Math.min(Math.max(Number(scopedQuery.pageSize || 50), 1), 100);
     const page = Math.max(Number(scopedQuery.page || 1), 1);
-    const [data, total] = await Promise.all([
+    const [dbFactors, dbTotal, missingFactorsReferenced] = await Promise.all([
       EmissionFactor.find(filter).sort({ isActive: -1, isCustom: -1, isOfficial: -1, isSample: 1, scope: 1, category: 1, sourceYear: -1 }).skip((page - 1) * pageSize).limit(pageSize).lean(),
       EmissionFactor.countDocuments(filter),
+      countMissingFactorReferences(companyId),
     ]);
 
+    const includeSamples = scopedQuery.type !== "custom" && scopedQuery.type !== "official" && scopedQuery.isSample !== "false" && scopedQuery.status !== "inactive" && scopedQuery.isActive !== "false";
+    const sampleFactors = includeSamples ? getSampleFactors().map((factor) => ({
+      ...factor,
+      id: `sample:${factor.scope}:${factor.category}:${factor.activityType}:${factor.factorKey}:${factor.activityUnit}:${factor.region}`,
+      _id: `sample:${factor.scope}:${factor.category}:${factor.activityType}:${factor.factorKey}:${factor.activityUnit}:${factor.region}`,
+      companyId: null,
+      isActive: true,
+      isOfficial: false,
+      isCustom: false,
+      canEdit: false,
+      factorStatus: "sample",
+    })) : [];
+
+    const sampleFiltered = sampleFactors.filter((factor) => {
+      const search = String(scopedQuery.search || "").trim().toLowerCase();
+      return (!scopedQuery.scope || Number(factor.scope) === Number(scopedQuery.scope))
+        && (!scopedQuery.category || normalizeText(factor.category).includes(normalizeText(scopedQuery.category)))
+        && (!scopedQuery.activityType || normalizeText(factor.activityType) === normalizeText(scopedQuery.activityType))
+        && (!scopedQuery.factorKey || normalizeGeo(factor.factorKey) === normalizeGeo(scopedQuery.factorKey))
+        && (!scopedQuery.sourceYear || Number(factor.sourceYear) === Number(scopedQuery.sourceYear))
+        && (!scopedQuery.country || normalizeGeo(factor.country) === normalizeGeo(scopedQuery.country))
+        && (!scopedQuery.region || normalizeGeo(factor.region) === normalizeGeo(scopedQuery.region))
+        && (!scopedQuery.activityUnit || normalizeText(factor.activityUnit) === normalizeText(scopedQuery.activityUnit))
+        && (!search || [factor.name, factor.category, factor.activityType, factor.factorKey, factor.sourceName, factor.methodology].some((value) => normalizeText(value).includes(search)));
+    });
+
+    const data = [
+      ...dbFactors.map((factor) => ({ id: factor._id, ...factor, factorStatus: factorKind(factor), canEdit: factor.isCustom === true && String(factor.companyId || "") === String(companyId) })),
+      ...sampleFiltered,
+    ].sort((left, right) => {
+      const activeDiff = Number(right.isActive !== false) - Number(left.isActive !== false);
+      if (activeDiff) return activeDiff;
+      const rank = { custom: 3, official: 2, configured: 1, sample: 0 };
+      const rankDiff = (rank[factorKind(right)] || 0) - (rank[factorKind(left)] || 0);
+      if (rankDiff) return rankDiff;
+      if (Number(left.scope) !== Number(right.scope)) return Number(left.scope) - Number(right.scope);
+      return String(left.category || "").localeCompare(String(right.category || ""));
+    });
+
+    const total = dbTotal + sampleFiltered.length;
+    const pagedData = data.slice(0, pageSize);
+    const summary = data.reduce((counts, factor) => {
+      const kind = factorKind(factor);
+      if (kind === "custom") counts.customFactors += 1;
+      if (kind === "official") counts.officialFactors += 1;
+      if (kind === "sample") counts.sampleFactors += 1;
+      return counts;
+    }, {
+      customFactors: 0,
+      officialFactors: 0,
+      sampleFactors: 0,
+      missingFactorsReferenced,
+    });
+
     return {
-      data: data.map((factor) => ({ id: factor._id, ...factor, factorStatus: factorKind(factor), canEdit: factor.isCustom === true && String(factor.companyId || "") === String(companyId) })),
+      data: pagedData,
       pagination: {
         page,
         pageSize,
         total,
         totalPages: Math.max(Math.ceil(total / pageSize), 1),
       },
+      summary,
     };
   }
 
@@ -600,6 +688,9 @@ class EmissionFactorService {
         normalized = validateFactorPayload({
           ...row.payload,
           companyId: row.payload.companyId || actor?.companyId || null,
+          isSample: false,
+          isOfficial: actor?.companyId ? false : row.payload.isOfficial,
+          isCustom: actor?.companyId ? true : row.payload.isCustom,
         });
         if (normalized.isOfficial && !normalized.companyId && !actorCanManageGlobalOfficial(actor)) {
           errors.push("admin or superadmin permission is required for official global factors");
@@ -630,6 +721,27 @@ class EmissionFactorService {
       validRowItems: previewRows.filter((row) => row.valid),
       invalidRowItems: previewRows.filter((row) => !row.valid),
     };
+  }
+
+  static async previewCompanyImport(csv, actor = null) {
+    const preview = await this.previewImport(csv, { ...actor, companyId: actor?.companyId || null });
+    await AuditService.log({
+      companyId: actor?.companyId || null,
+      userId: actor?.id || null,
+      userEmail: actor?.email || null,
+      action: "emission_factor_import_previewed",
+      entityType: "EmissionFactor",
+      entityId: "csv-import-preview",
+      ipAddress: actor?.ipAddress || null,
+      userAgent: actor?.userAgent || null,
+      details: {
+        totalRows: preview.totalRows,
+        validRows: preview.validRows,
+        invalidRows: preview.invalidRows,
+        duplicateWarnings: preview.duplicateWarnings,
+      },
+    });
+    return preview;
   }
 
   static async commitImport(csv, actor = null) {

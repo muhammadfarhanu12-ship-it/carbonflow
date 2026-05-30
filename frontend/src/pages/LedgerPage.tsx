@@ -1056,7 +1056,7 @@ function buildCalculationPreview(activityForm: EmissionActivityPayload, factor: 
     sourceName: factor.sourceName,
     sourceYear: factor.sourceYear,
     isSample: factor.isSample !== false,
-    isOfficial: factor.isOfficial === true || (factor.isSample === false && !factor.isCustom),
+    isOfficial: factor.isSample === false && factor.isOfficial === true && Boolean(factor.sourceName && factor.sourceYear),
     isCustom: factor.isCustom === true,
   };
 }
@@ -1078,7 +1078,7 @@ function CalculationPreviewPanel({
     <div className={`${preview.isSample ? "border-amber-300 bg-amber-50 text-amber-900" : "border-emerald-300 bg-emerald-50 text-emerald-800"} rounded-md border px-3 py-2 text-xs md:col-span-2 xl:col-span-4`}>
       <div className="font-medium">Calculation preview</div>
       <div className="flex flex-wrap items-center gap-2">
-        <span>{preview.isSample ? "Sample" : preview.isCustom ? "Custom" : "Official"}</span>
+        <span>{preview.isSample ? "Sample" : preview.isCustom ? "Custom" : preview.isOfficial ? "Official" : "Configured"}</span>
         <span>{preview.sourceName || "Configured emission factor"} {preview.sourceYear || ""}</span>
       </div>
       <div>Matched factor: {preview.factorValue} {preview.factorUnit}</div>
