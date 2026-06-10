@@ -133,6 +133,29 @@ describe("auth routes", () => {
     expect(mockSendEmailVerificationEmail).toHaveBeenCalledTimes(1);
   });
 
+  test("POST /auth/signup returns provider error when verification email cannot be sent", async () => {
+    const createdUser = createMockUser({
+      email: "newuser@example.com",
+      isVerified: false,
+    });
+    mockUserCreate.mockResolvedValue(createdUser);
+    mockProvisionCompanyForUser.mockResolvedValue(createdUser);
+    const emailError = new Error("Email provider authentication failed for smtp.gmail.com:587.");
+    emailError.statusCode = 503;
+    mockSendEmailVerificationEmail.mockRejectedValue(emailError);
+
+    const response = await request(app).post("/auth/signup").send({
+      name: "New User",
+      email: "newuser@example.com",
+      password: "StrongPass1!",
+      confirmPassword: "StrongPass1!",
+    });
+
+    expect(response.status).toBe(503);
+    expect(response.body.success).toBe(false);
+    expect(response.body.message).toMatch(/email provider authentication failed/i);
+  });
+
   test("POST /auth/login returns 401 for unknown user", async () => {
     mockUserScopeFindOne.mockResolvedValue(null);
 
@@ -238,7 +261,7 @@ describe("auth routes", () => {
     expect(response.body.message).toMatch(/token invalid/i);
   });
 
-  test("POST /auth/resend-verification always returns generic success", async () => {
+  test("POST /auth/resend-verification returns generic success when no account exists", async () => {
     mockUserScopeFindOne.mockResolvedValue(null);
 
     const response = await request(app).post("/auth/resend-verification").send({
@@ -248,6 +271,59 @@ describe("auth routes", () => {
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.message).toMatch(/if an unverified account exists/i);
+  });
+
+  test("POST /auth/resend-verification returns provider error when resend fails", async () => {
+    const user = createMockUser({
+      email: "unverified@example.com",
+      isVerified: false,
+    });
+    mockUserScopeFindOne.mockResolvedValue(user);
+    const emailError = new Error("Email provider is not configured. Set SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASS in backend/.env before sending authentication emails.");
+    emailError.statusCode = 503;
+    mockSendEmailVerificationEmail.mockRejectedValue(emailError);
+
+    const response = await request(app).post("/auth/resend-verification").send({
+      email: "unverified@example.com",
+    });
+
+    expect(response.status).toBe(503);
+    expect(response.body.success).toBe(false);
+    expect(response.body.message).toMatch(/email provider is not configured/i);
+  });
+
+  test("POST /auth/forgot-password returns success when reset email is sent", async () => {
+    const user = createMockUser({
+      email: "reset@example.com",
+    });
+    mockUserScopeFindOne.mockResolvedValue(user);
+
+    const response = await request(app).post("/auth/forgot-password").send({
+      email: "reset@example.com",
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.message).toBe("Password reset email sent.");
+    expect(mockSendResetPasswordEmail).toHaveBeenCalledTimes(1);
+  });
+
+  test("POST /auth/forgot-password returns provider error when reset email cannot be sent", async () => {
+    const user = createMockUser({
+      email: "reset@example.com",
+    });
+    mockUserScopeFindOne.mockResolvedValue(user);
+    const emailError = new Error("Email provider smtp.gmail.com:587 could not be reached.");
+    emailError.statusCode = 503;
+    mockSendResetPasswordEmail.mockRejectedValue(emailError);
+
+    const response = await request(app).post("/auth/forgot-password").send({
+      email: "reset@example.com",
+    });
+
+    expect(response.status).toBe(503);
+    expect(response.body.success).toBe(false);
+    expect(response.body.message).toMatch(/email provider smtp.gmail.com:587 could not be reached/i);
   });
 
   test("POST /auth/refresh-token returns validation error for missing token", async () => {

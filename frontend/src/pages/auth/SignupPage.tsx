@@ -114,9 +114,9 @@ export function SignupPage() {
               <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
                 <CheckCircle2 className="h-6 w-6 text-green-600" />
               </div>
-              <h3 className="text-lg font-medium text-foreground mb-2">Account created. Please check your email to verify your account.</h3>
+              <h3 className="text-lg font-medium text-foreground mb-2">Verification email sent</h3>
               <p className="text-sm text-muted-foreground mb-5">
-                We sent a verification link to <span className="font-medium text-foreground">{successEmail}</span>.
+                Your CarbonFlow account is ready. We sent a verification link to <span className="font-medium text-foreground">{successEmail}</span>.
               </p>
               <div className="flex flex-col gap-3">
                 <Button asChild className="w-full">

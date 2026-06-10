@@ -1,4 +1,4 @@
-import { apiClient } from "./apiClient";
+import { apiClient, axiosClient } from "./apiClient";
 import type { AuthResponse, SessionUser } from "@/src/types/platform";
 import {
   clearStoredSession,
@@ -19,6 +19,7 @@ export interface SignupResponse {
   email: string;
   verificationRequired: boolean;
   emailSent?: boolean;
+  message?: string;
 }
 
 export interface SigninData {
@@ -80,18 +81,23 @@ class AuthService {
   }
 
   async signup(data: SignupData): Promise<SignupResponse> {
-    const response = await apiClient.post<{ email?: string; verificationRequired?: boolean; emailSent?: boolean }>("/auth/signup", {
+    const response = await axiosClient.post<{
+      message?: string;
+      data?: { email?: string; verificationRequired?: boolean; emailSent?: boolean };
+    }>("/auth/signup", {
       name: data.name,
       email: data.email,
       password: data.password,
       confirmPassword: data.confirmPassword || data.password,
       companyName: data.company || undefined,
     });
+    const payload = response.data?.data ?? {};
 
     return {
-      email: response?.email || data.email,
-      verificationRequired: response?.verificationRequired ?? true,
-      emailSent: response?.emailSent,
+      email: payload.email || data.email,
+      verificationRequired: payload.verificationRequired ?? true,
+      emailSent: payload.emailSent,
+      message: response.data?.message,
     };
   }
 
@@ -104,8 +110,11 @@ class AuthService {
     return this.normalizeAuthResponse(response);
   }
 
-  async forgotPassword(email: string): Promise<void> {
-    await apiClient.post("/auth/forgot-password", { email });
+  async forgotPassword(email: string): Promise<{ message?: string }> {
+    const response = await axiosClient.post<{ message?: string }>("/auth/forgot-password", { email });
+    return {
+      message: response.data?.message,
+    };
   }
 
   async resetPassword(password: string, token: string): Promise<void> {
@@ -128,19 +137,25 @@ class AuthService {
     });
   }
 
-  async resendVerification(email: string): Promise<{ email: string }> {
+  async resendVerification(email: string): Promise<{ email: string; emailSent?: boolean; message?: string }> {
     const normalizedEmail = String(email || "").trim();
 
     if (!normalizedEmail) {
       throw new Error("Email is required");
     }
 
-    const response = await apiClient.post<{ email?: string }>("/auth/resend-verification", {
+    const response = await axiosClient.post<{
+      message?: string;
+      data?: { email?: string; emailSent?: boolean };
+    }>("/auth/resend-verification", {
       email: normalizedEmail,
     });
+    const payload = response.data?.data ?? {};
 
     return {
-      email: response?.email || normalizedEmail,
+      email: payload.email || normalizedEmail,
+      emailSent: payload.emailSent,
+      message: response.data?.message,
     };
   }
 

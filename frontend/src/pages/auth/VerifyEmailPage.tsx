@@ -78,7 +78,7 @@ export function VerifyEmailPage() {
     try {
       const response = await authService.resendVerification(normalizedEmail);
       setEmail(response.email);
-      setResendMessage('Verification email sent. Please check your inbox.');
+      setResendMessage(response.message || 'If an unverified account exists for that email, a new verification email has been sent.');
     } catch (error) {
       setResendError(error instanceof Error ? error.message : 'Failed to resend verification email');
     } finally {

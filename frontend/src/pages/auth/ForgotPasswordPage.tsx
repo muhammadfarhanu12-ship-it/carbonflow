@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Leaf, Loader2, Mail, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { Leaf, Loader2, Mail, ArrowLeft } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { Input } from '@/src/components/ui/input';
 import { Label } from '@/src/components/ui/label';
@@ -11,6 +11,7 @@ export function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -24,7 +25,8 @@ export function ForgotPasswordPage() {
 
     setIsLoading(true);
     try {
-      await authService.forgotPassword(email);
+      const response = await authService.forgotPassword(email);
+      setSuccessMessage(response.message || 'If an account exists for that email, a reset link has been sent.');
       setSuccess(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send reset email');
@@ -63,10 +65,9 @@ export function ForgotPasswordPage() {
               <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-primary/10 mb-6">
                 <Mail className="h-8 w-8 text-primary" />
               </div>
-              <h3 className="text-xl font-medium text-foreground mb-3">Check your email</h3>
+              <h3 className="text-xl font-medium text-foreground mb-3">Password reset request received</h3>
               <p className="text-sm text-muted-foreground mb-8 leading-relaxed">
-                We've sent a password reset link to <span className="font-medium text-foreground">{email}</span>. 
-                Please check your inbox and follow the instructions.
+                {successMessage}
               </p>
               <Button variant="outline" className="w-full" asChild>
                 <Link to="/auth/signin">

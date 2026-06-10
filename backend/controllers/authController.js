@@ -145,13 +145,13 @@ async function issueEmailVerificationToken(user, source = "auth.flow") {
   await user.save();
 
   try {
-    const emailInfo = await sendEmailVerificationEmail({
+    await sendEmailVerificationEmail({
       to: user.email,
       name: user.name,
       verificationUrl: buildEmailVerificationUrl(rawToken),
     });
 
-    return { emailSent: Boolean(emailInfo) };
+    return { emailSent: true };
   } catch (emailError) {
     logger.error(`${source}.verification_email_failed`, {
       userId: user.id,
@@ -159,8 +159,7 @@ async function issueEmailVerificationToken(user, source = "auth.flow") {
       message: emailError.message,
       stack: env.isProduction ? undefined : emailError.stack,
     });
-
-    return { emailSent: false };
+    throw emailError;
   }
 }
 
@@ -289,9 +288,7 @@ exports.signup = async (req, res) => {
 
     return sendSuccess(res, {
       statusCode: 201,
-      message: verificationDelivery.emailSent
-        ? "Account created. Please check your email to verify your account."
-        : "Account created. We could not send the verification email right now. Please use resend verification.",
+      message: "Account created and verification email sent.",
       data: {
         email: hydratedUser.email,
         verificationRequired: true,
@@ -474,12 +471,21 @@ exports.resendVerification = async (req, res) => {
 
     if (user && user.isVerified === false) {
       await issueEmailVerificationToken(user, "auth.resendVerification");
+
+      return sendSuccess(res, {
+        message: "Verification email sent.",
+        data: {
+          email: payload.email,
+          emailSent: true,
+        },
+      });
     }
 
     return sendSuccess(res, {
-      message: "If an unverified account exists for that email, a new verification email has been sent",
+      message: "If an unverified account exists for that email, a new verification email has been sent.",
       data: {
         email: payload.email,
+        emailSent: false,
       },
     });
   } catch (error) {
@@ -517,6 +523,10 @@ exports.forgotPassword = async (req, res, next) => {
         to: user.email,
         name: user.name,
         resetUrl,
+      });
+
+      return sendSuccess(res, {
+        message: "Password reset email sent.",
       });
     }
 
