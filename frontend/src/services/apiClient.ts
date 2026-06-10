@@ -61,6 +61,21 @@ function normalizeApiPath(path: string) {
   return prefixed.replace(/^\/api(?=\/|$)/i, "") || "/";
 }
 
+function isAuthenticationRequestPath(path: string) {
+  return [
+    "/auth/login",
+    "/auth/signup",
+    "/auth/signin",
+    "/auth/forgot-password",
+    "/auth/reset-password",
+    "/auth/refresh-token",
+    "/auth/verify-email",
+    "/auth/resend-verification",
+    "/auth/me",
+    "/auth/logout",
+  ].some((authPath) => path.includes(authPath));
+}
+
 function parseBackendErrorPayload(payload: unknown) {
   if (!payload) {
     return null;
@@ -201,6 +216,8 @@ async function buildApiErrorMessage(error: unknown) {
   }
 
   const backendMessage = await extractBackendMessage(error);
+  const requestPath = String(error.config?.url || "");
+  const isAuthRequest = isAuthenticationRequestPath(requestPath);
 
   if (backendMessage) {
     return backendMessage;
@@ -209,6 +226,10 @@ async function buildApiErrorMessage(error: unknown) {
   const requestUrl = buildRequestUrl(error);
 
   if (error.code === "ECONNABORTED") {
+    if (isAuthRequest) {
+      return "Authentication server is waking up. This can take up to 60 seconds.";
+    }
+
     const timeoutSeconds = Number(error.config?.timeout || REQUEST_TIMEOUT_MS) / 1000;
     return `Request to ${requestUrl} timed out after ${timeoutSeconds}s. Backend is waking up. This can take up to 60 seconds on the free Render plan.`;
   }
@@ -222,6 +243,10 @@ async function buildApiErrorMessage(error: unknown) {
   }
 
   if (error.request) {
+    if (isAuthRequest) {
+      return "Cannot connect to authentication server. Please try again when the server is available.";
+    }
+
     return `Cannot connect to backend API at ${API_BASE_URL}. Make sure the backend server is running at ${BACKEND_ORIGIN} and VITE_API_URL matches.`;
   }
 
@@ -314,23 +339,16 @@ axiosClient.interceptors.response.use(
       _coldStartRetried?: boolean;
     };
     const requestPath = String(originalRequest.url || "");
-    const isAuthFlowRequest = [
-      "/auth/login",
-      "/auth/signup",
-      "/auth/signin",
-      "/auth/forgot-password",
-      "/auth/reset-password",
-      "/auth/refresh-token",
-      "/auth/verify-email",
-      "/auth/resend-verification",
-    ].some((path) => requestPath.includes(path));
+    const isAuthFlowRequest = isAuthenticationRequestPath(requestPath);
     const hadToken = Boolean(getAccessToken());
 
     if (shouldRetryColdStart(error, originalRequest)) {
       originalRequest._coldStartRetried = true;
       originalRequest.timeout = WAKEUP_REQUEST_TIMEOUT_MS;
       dispatchApiRetryEvent({
-        message: "Backend is waking up. This can take up to 60 seconds on the free Render plan. Retrying request once...",
+        message: isAuthFlowRequest
+          ? "Authentication server is waking up. This can take up to 60 seconds."
+          : "Backend is waking up. This can take up to 60 seconds on the free Render plan. Retrying request once...",
         path: requestPath || undefined,
       });
       await wait(COLD_START_RETRY_DELAY_MS);

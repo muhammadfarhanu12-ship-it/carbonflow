@@ -1,6 +1,7 @@
 const { Company, Setting } = require("../models");
 const env = require("../config/env");
 const EmissionRecordService = require("./emissionRecord.service");
+const AuditService = require("./audit.service");
 
 function buildDefaultCompanyName(user, overrideName) {
   if (overrideName && String(overrideName).trim()) {
@@ -59,9 +60,33 @@ class UserContextService {
       apiKeys: [],
     });
 
+    const previousRole = user.role;
     user.companyId = company.id;
+    if (String(user.role || "").toUpperCase() !== "SUPERADMIN") {
+      user.role = overrides.role || "OWNER";
+    }
     await user.save();
     await EmissionRecordService.syncOperationalRecords(company.id, settings);
+    await AuditService.log({
+      companyId: company.id,
+      userId: user.id,
+      userEmail: user.email,
+      action: "owner_bootstrapped",
+      entityType: "User",
+      entityId: user.id,
+      oldValue: {
+        role: previousRole,
+        companyId: null,
+      },
+      newValue: {
+        role: user.role,
+        companyId: company.id,
+      },
+      details: {
+        companyName: company.name,
+        bootstrapReason: "first_workspace_user",
+      },
+    });
     return user.reload();
   }
 

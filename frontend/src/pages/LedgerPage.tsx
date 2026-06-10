@@ -1,5 +1,7 @@
+// frontend/src/pages/LedgerPage.tsx
 import { type FormEvent, useEffect, useState } from "react";
-import { AlertTriangle, BarChart3, CheckCircle2, DollarSign, Download, Eye, Factory, FileText, Loader2, PlusCircle, Send, Upload, XCircle } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { AlertTriangle, BarChart3, CheckCircle2, DollarSign, Download, Eye, Factory, FileText, Info, Loader2, PlusCircle, Send, Upload, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card";
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
@@ -13,6 +15,7 @@ import { socketService } from "@/src/services/socketService";
 import { useAuth } from "@/src/hooks/useAuth";
 import { buildLedgerFactorMessage } from "./ledgerFactorMessage";
 import { NO_PERMISSION_MESSAGE, hasPermission } from "@/src/utils/permissions";
+import { financialTextClassName, joinDisplayLabel, normalizeMonthLabel, uniqueMessages } from "@/src/utils/format";
 import type { EmissionRecord, LedgerEntry, LedgerOverview, ReportItem, Shipment, Supplier } from "@/src/types/platform";
 
 const ACTIVITY_PRESETS: Record<string, Pick<EmissionActivityPayload, "scope" | "category" | "activityType" | "activityUnit" | "fuelType">> = {
@@ -38,6 +41,39 @@ const DEFAULT_ACTIVITY_BY_SCOPE: Record<1 | 2 | 3, keyof typeof ACTIVITY_PRESETS
 };
 
 const SAMPLE_IMPORT_CSV = "scope,category,activityType,activityAmount,activityUnit,factorKey,reportingPeriodStart,reportingPeriodEnd,activityDate,facility,businessUnit,country,region,supplier,notes\n1,Stationary combustion,stationary_fuel,100,liter,DIESEL,2026-05-01,2026-05-31,2026-05-15,Plant A,Operations,US,GLOBAL,Acme Fuels,Boiler diesel use\n2,Purchased electricity,electricity,1000,kWh,GLOBAL,2026-05-01,2026-05-31,2026-05-15,HQ,Operations,US,GLOBAL,Utility Provider,Grid electricity\n3,Business travel,business_travel_air,1500,km,BUSINESS_TRAVEL_AIR_KM,2026-05-01,2026-05-31,2026-05-20,HQ,Sales,US,GLOBAL,Travel Vendor,Flight travel";
+const FILTER_BANNER_STORAGE_KEY = "cf_filter_banner_dismissed";
+const SAMPLE_FACTOR_WARNING = "This activity uses a sample emission factor. Replace with an official/custom factor before official reporting.";
+const MISSING_FACTOR_ERROR = "No matching factor was found for this activity.";
+const INVALID_ACTIVITY_AMOUNT_ERROR = "Activity amount must be greater than 0 before this can be a calculated record.";
+const ZERO_ACTIVITY_TOOLTIP = "These records have an activity amount of 0 and will not contribute to emission totals. Update the amount or delete these records if they were entered in error.";
+const AUTO_FILTER_BANNER = "Showing all statuses - no approved records yet.";
+const emptyLedgerQuery = { view: "all", search: "", scope: "", status: "", factorStatus: "", reportingPeriod: "", supplierId: "", supplierRiskLevel: "", qualityFilter: "" };
+
+type QualityFilter = "missing_factor" | "zero_activity" | "missing_period" | "missing_facility" | "rejected" | "needs_correction" | "sample_factor" | "calculation_error" | "unlinked_supplier";
+
+const QUALITY_FILTER_LABELS: Record<QualityFilter, string> = {
+  missing_factor: "Missing factors",
+  zero_activity: "Zero activity amount",
+  missing_period: "Missing period",
+  missing_facility: "Missing facility/BU",
+  rejected: "Rejected records",
+  needs_correction: "Needs correction",
+  sample_factor: "Sample factors",
+  calculation_error: "Calculation errors",
+  unlinked_supplier: "Unlinked suppliers",
+};
+
+const QUALITY_FILTER_QUERY: Record<QualityFilter, Partial<typeof emptyLedgerQuery>> = {
+  missing_factor: { factorStatus: "missing" },
+  zero_activity: { qualityFilter: "zero_activity" },
+  missing_period: { qualityFilter: "missing_period" },
+  missing_facility: { qualityFilter: "missing_facility" },
+  rejected: { status: "rejected" },
+  needs_correction: { status: "needs_correction", view: "needs_correction" },
+  sample_factor: { factorStatus: "sample" },
+  calculation_error: { qualityFilter: "calculation_error" },
+  unlinked_supplier: { qualityFilter: "unlinked_supplier" },
+};
 
 const emptyOverview: LedgerOverview = {
   data: [],
@@ -62,6 +98,13 @@ const emptyOverview: LedgerOverview = {
 
 export function LedgerPage() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialQualityFilter = searchParams.get("qualityFilter");
+  const initialLedgerQuery = {
+    ...emptyLedgerQuery,
+    ...(isQualityFilter(initialQualityFilter) ? QUALITY_FILTER_QUERY[initialQualityFilter] : {}),
+    qualityFilter: isQualityFilter(initialQualityFilter) ? initialQualityFilter : "",
+  };
   const [overview, setOverview] = useState<LedgerOverview>(emptyOverview);
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -75,7 +118,10 @@ export function LedgerPage() {
   const [importSuccess, setImportSuccess] = useState("");
   const [statusNotes, setStatusNotes] = useState<Record<string, string>>({});
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
-  const [ledgerQuery, setLedgerQuery] = useState({ view: "approved", search: "", scope: "", status: "", factorStatus: "", reportingPeriod: "", supplierId: "", supplierRiskLevel: "" });
+  const [ledgerQuery, setLedgerQuery] = useState(initialLedgerQuery);
+  const [showAutoFilterBanner, setShowAutoFilterBanner] = useState(false);
+  const [filterBannerDismissed, setFilterBannerDismissed] = useState(() => window.localStorage.getItem(FILTER_BANNER_STORAGE_KEY) === "true");
+  const [userHasInteractedWithPreview, setUserHasInteractedWithPreview] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<EmissionRecord | null>(null);
   const [recordSuccess, setRecordSuccess] = useState("");
   const [reportModalOpen, setReportModalOpen] = useState(false);
@@ -119,6 +165,7 @@ export function LedgerPage() {
     reportingPeriod: new Date().toISOString().slice(0, 7),
     occurredAt: new Date().toISOString().slice(0, 10),
   });
+  const [debouncedActivityAmount, setDebouncedActivityAmount] = useState(Number(activityForm.activityAmount || 0));
 
   const loadPage = async (query = ledgerQuery) => {
     try {
@@ -132,6 +179,10 @@ export function LedgerPage() {
         shipmentService.getShipments("?pageSize=50"),
       ]);
       setOverview(ledgerResponse);
+      if (Number(ledgerResponse.summary.approvedRecords || 0) === 0 && !filterBannerDismissed) {
+        setShowAutoFilterBanner(true);
+        setLedgerQuery((current) => current.view === "approved" ? { ...current, view: "all" } : current);
+      }
       setShipments(shipmentResponse.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load ledger");
@@ -170,7 +221,25 @@ export function LedgerPage() {
       void loadPage(ledgerQuery);
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [ledgerQuery.view, ledgerQuery.search, ledgerQuery.scope, ledgerQuery.status, ledgerQuery.factorStatus, ledgerQuery.reportingPeriod, ledgerQuery.supplierId, ledgerQuery.supplierRiskLevel]);
+  }, [ledgerQuery.view, ledgerQuery.search, ledgerQuery.scope, ledgerQuery.status, ledgerQuery.factorStatus, ledgerQuery.reportingPeriod, ledgerQuery.supplierId, ledgerQuery.supplierRiskLevel, ledgerQuery.qualityFilter]);
+
+  useEffect(() => {
+    const filter = searchParams.get("qualityFilter");
+    if (!isQualityFilter(filter)) return;
+    setLedgerQuery((current) => ({
+      ...current,
+      ...QUALITY_FILTER_QUERY[filter],
+      qualityFilter: filter,
+      view: QUALITY_FILTER_QUERY[filter].view ?? "all",
+    }));
+  }, [searchParams]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedActivityAmount(Number(activityForm.activityAmount || 0));
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [activityForm.activityAmount]);
 
   useEffect(() => {
     let cancelled = false;
@@ -258,8 +327,7 @@ export function LedgerPage() {
     if (!activityForm.fuelType && !activityForm.factorKey && !activityForm.factorValue) nextErrors.factorKey = "Factor key is required unless using a custom factor.";
     if (!activityForm.reportingPeriod?.trim()) nextErrors.reportingPeriod = "Reporting period is required.";
     if (!activityForm.occurredAt) nextErrors.occurredAt = "Activity date is required.";
-    if (!Number.isFinite(Number(activityForm.activityAmount)) || Number(activityForm.activityAmount) < 0) nextErrors.activityAmount = "Activity amount must be zero or greater.";
-    if (Number(activityForm.activityAmount) === 0 && status !== "draft") nextErrors.activityAmount = "Activity amount must be greater than 0 before submitting.";
+    if (!Number.isFinite(Number(activityForm.activityAmount)) || Number(activityForm.activityAmount) <= 0) nextErrors.activityAmount = "Activity amount must be greater than 0 before saving.";
     if (activityForm.country && !/^[A-Za-z]{2,3}$/.test(activityForm.country.trim())) nextErrors.country = "Use a 2 or 3 letter country code.";
     setFormErrors(nextErrors);
     return nextErrors;
@@ -278,6 +346,7 @@ export function LedgerPage() {
         occurredAt: activityForm.occurredAt ? new Date(activityForm.occurredAt).toISOString() : undefined,
       });
       setActivityForm((current) => ({ ...current, activityAmount: 0, description: "" }));
+      setUserHasInteractedWithPreview(false);
       await loadPage();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to record emission activity");
@@ -360,7 +429,12 @@ export function LedgerPage() {
   };
 
   const handleCsvFile = async (file: File | null) => {
-    if (!file) return;
+    if (!file) {
+      setImportCsv("");
+      setImportPreview(null);
+      setImportSuccess("");
+      return;
+    }
     const text = await file.text();
     setImportCsv(text);
     setImportPreview(null);
@@ -427,10 +501,32 @@ export function LedgerPage() {
   const canReviewRecords = hasPermission(user, "emission:approve") || ["MANAGER", "ADMIN", "SUPERADMIN", "OWNER"].includes(normalizedRole);
   const canCreateRecords = hasPermission(user, "emission:create") || ["OWNER", "ADMIN", "MANAGER", "DATA_ENTRY", "USER"].includes(normalizedRole);
   const canCreateFinancialEntries = hasPermission(user, "ledger:financial:create") || ["OWNER", "ADMIN", "MANAGER"].includes(normalizedRole);
-  const calculationPreview = buildCalculationPreview(activityForm, matchedFactor);
+  const shouldShowActivityPreview = userHasInteractedWithPreview && debouncedActivityAmount > 0;
+  const calculationPreview = shouldShowActivityPreview ? buildCalculationPreview({ ...activityForm, activityAmount: debouncedActivityAmount }, matchedFactor) : null;
   const categoryRows = overview.categoryBreakdown?.length ? overview.categoryBreakdown : overview.breakdowns.byCategory;
   const supplierRows = overview.supplierBreakdown?.length ? overview.supplierBreakdown : overview.breakdowns.bySupplier;
   const monthRows = overview.monthlyBreakdown?.length ? overview.monthlyBreakdown : overview.breakdowns.byMonth;
+  const validImportRowCount = Number(importPreview?.validRows || 0);
+  const activeQualityFilter = isQualityFilter(ledgerQuery.qualityFilter) ? ledgerQuery.qualityFilter : null;
+  const submitHasBlockingErrors = shouldShowActivityPreview && getCalculationPreviewErrors(matchedFactor, calculationPreview).length > 0;
+  const applyQualityFilter = (qualityFilter: QualityFilter) => {
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.set("qualityFilter", qualityFilter);
+    setSearchParams(nextSearchParams);
+    setLedgerQuery((current) => ({
+      ...current,
+      ...QUALITY_FILTER_QUERY[qualityFilter],
+      qualityFilter,
+      view: QUALITY_FILTER_QUERY[qualityFilter].view ?? "all",
+    }));
+    document.getElementById("emission-records")?.scrollIntoView({ behavior: "smooth" });
+  };
+  const clearQualityFilter = () => {
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.delete("qualityFilter");
+    setSearchParams(nextSearchParams);
+    setLedgerQuery((current) => ({ ...current, view: "all", factorStatus: "", status: "", qualityFilter: "" }));
+  };
 
   return (
     <div className="space-y-6">
@@ -462,6 +558,16 @@ export function LedgerPage() {
       {error && <div className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>}
       {recordSuccess && <div className="rounded-md border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{recordSuccess}</div>}
       {supplierError && <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">Supplier picker could not load: {supplierError}</div>}
+      {showAutoFilterBanner && !filterBannerDismissed ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+          <span>{AUTO_FILTER_BANNER}</span>
+          <Button type="button" size="sm" variant="outline" onClick={() => {
+            window.localStorage.setItem(FILTER_BANNER_STORAGE_KEY, "true");
+            setFilterBannerDismissed(true);
+            setShowAutoFilterBanner(false);
+          }}>Dismiss</Button>
+        </div>
+      ) : null}
       {reportSuccess && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
           <span>Report generated successfully.</span>
@@ -541,7 +647,10 @@ export function LedgerPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="amount">Activity Amount</Label>
-                <Input id="amount" type="number" min="0" step="0.0001" value={activityForm.activityAmount} onChange={(event) => setActivityForm((current) => ({ ...current, activityAmount: Number(event.target.value) }))} required />
+                <Input id="amount" type="number" min="0" step="0.0001" value={activityForm.activityAmount} onBlur={() => setUserHasInteractedWithPreview(true)} onChange={(event) => {
+                  setUserHasInteractedWithPreview(true);
+                  setActivityForm((current) => ({ ...current, activityAmount: Number(event.target.value) }));
+                }} required />
                 <FieldError message={formErrors.activityAmount} />
               </div>
               <div className="space-y-2">
@@ -551,7 +660,10 @@ export function LedgerPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="fuelType">Factor Key / Fuel</Label>
-                <Input id="fuelType" value={activityForm.fuelType ?? ""} onChange={(event) => setActivityForm((current) => ({ ...current, fuelType: event.target.value }))} placeholder="DIESEL, US, GLOBAL" />
+                <Input id="fuelType" value={activityForm.fuelType ?? ""} onBlur={() => setUserHasInteractedWithPreview(true)} onChange={(event) => {
+                  setUserHasInteractedWithPreview(true);
+                  setActivityForm((current) => ({ ...current, fuelType: event.target.value }));
+                }} placeholder="DIESEL, US, GLOBAL" />
                 <FieldError message={formErrors.factorKey} />
               </div>
               <div className="space-y-2">
@@ -622,12 +734,12 @@ export function LedgerPage() {
                 </Button>
               </div>
               <div className="flex items-end">
-                <Button type="button" disabled={savingActivity || !canCreateRecords} title={canCreateRecords ? "Submit for Review" : NO_PERMISSION_MESSAGE} className="w-full" onClick={(event) => submitActivity(event as unknown as FormEvent<HTMLFormElement>, "submitted")}>
+                <Button type="button" disabled={savingActivity || !canCreateRecords || submitHasBlockingErrors} title={canCreateRecords ? "Submit for Review" : NO_PERMISSION_MESSAGE} className="w-full" onClick={(event) => submitActivity(event as unknown as FormEvent<HTMLFormElement>, "submitted")}>
                   <Send className="mr-2 h-4 w-4" />
                   Submit for Review
                 </Button>
               </div>
-              <CalculationPreviewPanel matchedFactor={matchedFactor} preview={calculationPreview} />
+              {shouldShowActivityPreview ? <CalculationPreviewPanel matchedFactor={matchedFactor} preview={calculationPreview} /> : null}
             </form>
           </CardContent>
         </Card>
@@ -652,7 +764,11 @@ export function LedgerPage() {
             <textarea
               className="min-h-32 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               value={importCsv}
-              onChange={(event) => setImportCsv(event.target.value)}
+              onChange={(event) => {
+                setImportCsv(event.target.value);
+                setImportPreview(null);
+                setImportSuccess("");
+              }}
               placeholder="scope,category,activityType,activityAmount,activityUnit,reportingPeriodStart,reportingPeriodEnd,facility,businessUnit,country,notes"
             />
             {importSuccess && <div className="rounded-md border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{importSuccess}</div>}
@@ -671,7 +787,9 @@ export function LedgerPage() {
                 {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Preview CSV
               </Button>
-              <Button type="button" disabled={importing || !importPreview?.validRows} onClick={commitImport}>Save Valid Rows</Button>
+              <Button type="button" disabled={importing || validImportRowCount === 0} onClick={commitImport}>
+                {validImportRowCount > 0 ? `Save ${validImportRowCount} valid rows` : "Save valid rows"}
+              </Button>
             </div>
             {importPreview && (
               <div className="overflow-x-auto rounded-md border">
@@ -750,11 +868,11 @@ export function LedgerPage() {
           <CardContent className="space-y-3 text-sm text-muted-foreground">
             <div className="rounded-lg border p-3">
               <div className="text-foreground font-medium">Carbon Tax</div>
-              <div className="mt-1 text-xl font-semibold text-destructive">${summary.totalCarbonTax.toLocaleString()}</div>
+              <div className={`mt-1 text-xl font-semibold ${financialTextClassName(summary.totalCarbonTax)}`}>${summary.totalCarbonTax.toLocaleString()}</div>
             </div>
             <div className="rounded-lg border p-3">
               <div className="text-foreground font-medium">Carbon Cost Ratio</div>
-              <div className="mt-1 text-xl font-semibold text-primary">{summary.carbonCostRatio.toFixed(2)}%</div>
+              <div className={`mt-1 text-xl font-semibold ${financialTextClassName(summary.carbonCostRatio)}`}>{summary.carbonCostRatio.toFixed(2)}%</div>
             </div>
             <div className="rounded-lg border p-3">
               <div className="text-foreground font-medium">Ledger Carbon Cost</div>
@@ -768,18 +886,18 @@ export function LedgerPage() {
             <CardTitle>Data Quality Actions</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            <QualityTile label="Draft records" value={summary.draftRecords ?? 0} action="Submit Drafts" />
-            <QualityTile label="Submitted records" value={summary.submittedRecords ?? 0} action="Approve Submitted Records" />
-            <QualityTile label="Approved records" value={summary.approvedRecords ?? 0} action="Generate Report" />
-            <QualityTile label="Rejected records" value={summary.rejectedRecords ?? 0} action="Review Rejections" />
-            <QualityTile label="Needs correction" value={summary.needsCorrectionRecords ?? 0} action="Resolve Corrections" />
-            <QualityTile label="Missing factors" value={summary.missingFactorRecords ?? 0} action="Review Missing Factors" />
-            <QualityTile label="Sample factors" value={summary.sampleFactorRecords ?? 0} action="Manage Emission Factors" />
-            <QualityTile label="Zero activity" value={summary.zeroAmountRecords ?? 0} action="Import Activities" />
-            <QualityTile label="Calculation errors" value={summary.calculationErrorRecords ?? 0} action="Review Records" />
-            <QualityTile label="Unlinked suppliers" value={summary.unlinkedSupplierRecords ?? 0} action="Link Suppliers" />
-            <QualityTile label="Missing facility/BU" value={summary.missingFacilityRecords ?? 0} action="Add Metadata" />
-            <QualityTile label="Missing period" value={summary.missingReportingPeriodRecords ?? 0} action="Add Reporting Period" />
+            <QualityTile label="Draft records" value={summary.draftRecords ?? 0} action="Submit drafts" />
+            <QualityTile label="Submitted records" value={summary.submittedRecords ?? 0} action="Approve submitted records" />
+            <QualityTile label="Approved records" value={summary.approvedRecords ?? 0} action="Generate report" />
+            <QualityTile label="Rejected records" value={summary.rejectedRecords ?? 0} action="Review rejections" qualityFilter="rejected" onFilter={applyQualityFilter} />
+            <QualityTile label="Needs correction" value={summary.needsCorrectionRecords ?? 0} action="Resolve corrections" qualityFilter="needs_correction" onFilter={applyQualityFilter} />
+            <QualityTile label="Missing factors" value={summary.missingFactorRecords ?? 0} action="Review missing factors" qualityFilter="missing_factor" onFilter={applyQualityFilter} />
+            <QualityTile label="Sample factors" value={summary.sampleFactorRecords ?? 0} action="Manage emission factors" qualityFilter="sample_factor" onFilter={applyQualityFilter} />
+            <QualityTile label="Zero activity amount" value={summary.zeroAmountRecords ?? 0} action="Import activities" qualityFilter="zero_activity" tooltip={ZERO_ACTIVITY_TOOLTIP} onFilter={applyQualityFilter} />
+            <QualityTile label="Calculation errors" value={summary.calculationErrorRecords ?? 0} action="Review records" qualityFilter="calculation_error" onFilter={applyQualityFilter} />
+            <QualityTile label="Unlinked suppliers" value={summary.unlinkedSupplierRecords ?? 0} action="Link suppliers" qualityFilter="unlinked_supplier" onFilter={applyQualityFilter} />
+            <QualityTile label="Missing facility/BU" value={summary.missingFacilityRecords ?? 0} action="Add metadata" qualityFilter="missing_facility" onFilter={applyQualityFilter} />
+            <QualityTile label="Missing period" value={summary.missingReportingPeriodRecords ?? 0} action="Add reporting period" qualityFilter="missing_period" onFilter={applyQualityFilter} />
           </CardContent>
         </Card>
 
@@ -808,7 +926,7 @@ export function LedgerPage() {
         ) : null}
       </div>
 
-      <Card>
+      <Card id="emission-records">
         <CardHeader>
           <CardTitle>Monthly Scope Breakdown</CardTitle>
         </CardHeader>
@@ -829,7 +947,7 @@ export function LedgerPage() {
                   <tr><td colSpan={5} className="px-6 py-4 text-center text-muted-foreground">No calculated emissions yet. Add activity amount greater than 0, match a factor, and approve records to populate totals.</td></tr>
                 ) : monthRows.map((item) => (
                   <tr key={item.name} className="hover:bg-muted/50">
-                    <td className="px-6 py-4 font-medium text-foreground">{item.name}</td>
+                    <td className="px-6 py-4 font-medium text-foreground">{normalizeMonthLabel(item.name)}</td>
                     <td className="px-6 py-4">{item.scope1.toFixed(2)} tCO2e</td>
                     <td className="px-6 py-4">{item.scope2.toFixed(2)} tCO2e</td>
                     <td className="px-6 py-4">{item.scope3.toFixed(2)} tCO2e</td>
@@ -892,6 +1010,12 @@ export function LedgerPage() {
             </select>
             <Input placeholder="Reporting period" value={ledgerQuery.reportingPeriod} onChange={(event) => setLedgerQuery((current) => ({ ...current, reportingPeriod: event.target.value }))} />
           </div>
+          {activeQualityFilter ? (
+            <div className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/30 px-3 py-1 text-sm text-foreground">
+              <span>Filtered: {QUALITY_FILTER_LABELS[activeQualityFilter]}</span>
+              <button type="button" className="text-muted-foreground hover:text-foreground" aria-label="Clear quality filter" onClick={clearQualityFilter}>x</button>
+            </div>
+          ) : null}
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="border-b bg-muted/50 text-muted-foreground">
@@ -938,7 +1062,7 @@ export function LedgerPage() {
                     </td>
                     <td className="px-6 py-4">{formatActivity(record)}</td>
                     <td className="px-6 py-4"><FactorDisplay record={record} /></td>
-                    <td className="px-6 py-4">{record.factorSource || "Missing factor"} {record.factorSourceYear ? record.factorSourceYear : ""}</td>
+                    <td className="px-6 py-4">{joinDisplayLabel([record.factorSource || "Missing factor", record.factorSourceYear])}</td>
                     <td className="px-6 py-4">{formatFormula(record)}</td>
                     <td className="px-6 py-4">{(record.emissionsKgCo2e ?? record.amountTonnes * 1000).toFixed(2)}</td>
                     <td className="px-6 py-4 font-medium text-primary">{(record.emissionsTCo2e ?? record.amountTonnes).toFixed(4)}</td>
@@ -988,7 +1112,7 @@ export function LedgerPage() {
                     <td className="px-6 py-4">{entry.supplierVendor || "-"}</td>
                     <td className="px-6 py-4">{entry.description}</td>
                     <td className="px-6 py-4 text-right">${entry.logisticsCostUsd.toLocaleString()}</td>
-                    <td className="px-6 py-4 text-right text-destructive">${entry.carbonTaxUsd.toLocaleString()}</td>
+                    <td className={`px-6 py-4 text-right ${financialTextClassName(entry.carbonTaxUsd)}`}>${entry.carbonTaxUsd.toLocaleString()}</td>
                     <td className="px-6 py-4 text-right">${Number(entry.offsetCostUsd || 0).toLocaleString()}</td>
                     <td className="px-6 py-4 text-right font-bold">${entry.totalCostUsd.toLocaleString()}</td>
                   </tr>
@@ -1061,6 +1185,23 @@ function buildCalculationPreview(activityForm: EmissionActivityPayload, factor: 
   };
 }
 
+function getCalculationPreviewErrors(
+  matchedFactor: Awaited<ReturnType<typeof emissionsService.matchFactor>> | undefined,
+  preview: ReturnType<typeof buildCalculationPreview>,
+) {
+  const errors: string[] = [];
+  if (matchedFactor === null || !preview) errors.push(MISSING_FACTOR_ERROR);
+  if (preview && preview.amount <= 0) errors.push(INVALID_ACTIVITY_AMOUNT_ERROR);
+  return uniqueMessages(errors);
+}
+
+function getCalculationPreviewWarnings(preview: ReturnType<typeof buildCalculationPreview>, matchedFactor: Awaited<ReturnType<typeof emissionsService.matchFactor>> | undefined) {
+  const warnings: string[] = [];
+  if (preview?.isSample) warnings.push(SAMPLE_FACTOR_WARNING);
+  if (matchedFactor) warnings.push(buildLedgerFactorMessage(matchedFactor));
+  return uniqueMessages(warnings);
+}
+
 function CalculationPreviewPanel({
   matchedFactor,
   preview,
@@ -1071,31 +1212,75 @@ function CalculationPreviewPanel({
   if (matchedFactor === undefined) {
     return <div className="rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground md:col-span-2 xl:col-span-4">Matching emission factor...</div>;
   }
-  if (matchedFactor === null || !preview) {
-    return <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive md:col-span-2 xl:col-span-4">Missing factor warning: no matching factor was found for this activity.</div>;
-  }
+  const errors = getCalculationPreviewErrors(matchedFactor, preview);
+  const warnings = getCalculationPreviewWarnings(preview, matchedFactor);
+  const factorLabel = preview
+    ? joinDisplayLabel([preview.isSample ? "Sample" : preview.isCustom ? "Custom" : preview.isOfficial ? "Official" : "Configured", preview.sourceName || "Configured emission factor", preview.sourceYear])
+    : "Emission factor";
   return (
-    <div className={`${preview.isSample ? "border-amber-300 bg-amber-50 text-amber-900" : "border-emerald-300 bg-emerald-50 text-emerald-800"} rounded-md border px-3 py-2 text-xs md:col-span-2 xl:col-span-4`}>
-      <div className="font-medium">Calculation preview</div>
-      <div className="flex flex-wrap items-center gap-2">
-        <span>{preview.isSample ? "Sample" : preview.isCustom ? "Custom" : preview.isOfficial ? "Official" : "Configured"}</span>
-        <span>{preview.sourceName || "Configured emission factor"} {preview.sourceYear || ""}</span>
+    <div className="space-y-3 rounded-md border border-border bg-background px-3 py-3 text-sm md:col-span-2 xl:col-span-4" data-testid="calculation-preview">
+      <div>
+        <div className="text-sm font-medium text-foreground">Calculation preview</div>
+        <div className="mt-1 text-sm text-foreground">{factorLabel}</div>
+        {preview ? (
+          <div className="mt-1 font-mono text-[13px] text-muted-foreground">
+            {preview.amount} {preview.unit} x {preview.factorValue} {preview.factorUnit} = {preview.kg.toFixed(4)} kgCO2e = {preview.tonnes.toFixed(2)} tCO2e
+          </div>
+        ) : null}
       </div>
-      <div>Matched factor: {preview.factorValue} {preview.factorUnit}</div>
-      <div>Formula: {preview.amount} {preview.unit} x {preview.factorValue} {preview.factorUnit} = {preview.kg.toFixed(2)} kgCO2e = {preview.tonnes.toFixed(4)} tCO2e</div>
-      <div>{buildLedgerFactorMessage(matchedFactor)}</div>
-      {preview.amount <= 0 ? <div>Activity amount must be greater than 0 before this can be a calculated record.</div> : null}
-      {preview.isSample ? <div>This activity uses a sample emission factor. Replace with an official/custom factor before official reporting.</div> : null}
+      {warnings.length ? (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
+          {warnings.map((warning) => <div key={warning} className="flex gap-2"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span>{warning}</span></div>)}
+        </div>
+      ) : null}
+      {errors.length ? (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-[13px] text-destructive">
+          {errors.map((previewError) => <div key={previewError} className="flex gap-2"><XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span>{previewError}</span></div>)}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function QualityTile({ label, value, action }: { label: string; value: number; action: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-muted/20 p-3">
-      <div className="text-sm text-muted-foreground">{label}</div>
+function isQualityFilter(value: string | null | undefined): value is QualityFilter {
+  return Boolean(value && value in QUALITY_FILTER_LABELS);
+}
+
+function QualityTile({
+  label,
+  value,
+  action,
+  qualityFilter,
+  tooltip,
+  onFilter,
+}: {
+  label: string;
+  value: number;
+  action: string;
+  qualityFilter?: QualityFilter;
+  tooltip?: string;
+  onFilter?: (qualityFilter: QualityFilter) => void;
+}) {
+  const content = (
+    <>
+      <div className="flex items-center gap-1 text-sm text-muted-foreground">
+        <span>{label}</span>
+        {tooltip ? <Info className="h-3.5 w-3.5" aria-label={tooltip}><title>{tooltip}</title></Info> : null}
+      </div>
       <div className="mt-1 text-xl font-bold text-foreground">{value}</div>
       <div className="mt-2 text-xs font-medium text-primary">{action}</div>
+    </>
+  );
+  if (qualityFilter && onFilter) {
+    return (
+      <button type="button" className="rounded-lg border border-border bg-muted/20 p-3 text-left transition hover:border-primary/40 hover:bg-muted/40" onClick={() => onFilter(qualityFilter)}>
+        {content}
+      </button>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-border bg-muted/20 p-3">
+      {content}
     </div>
   );
 }
@@ -1125,7 +1310,7 @@ function FactorDisplay({ record }: { record: EmissionRecord }) {
 function formatActivity(record: EmissionRecord) {
   const factorKey = typeof record.metadata?.factorKey === "string" ? record.metadata.factorKey : typeof record.activityData?.fuelType === "string" ? record.activityData.fuelType : "";
   const activityType = typeof record.activityData?.activityType === "string" ? record.activityData.activityType.replaceAll("_", " ") : record.sourceType;
-  return `${record.activityAmount ?? "-"} ${record.activityUnit || ""} ${factorKey}`.trim() + `\n${activityType}`;
+  return joinDisplayLabel([record.activityAmount ?? "-", record.activityUnit, factorKey]) + `\n${activityType}`;
 }
 
 function formatFormula(record: EmissionRecord) {
@@ -1135,8 +1320,8 @@ function formatFormula(record: EmissionRecord) {
 
 function formatPeriodRange(record: EmissionRecord) {
   if (!record.reportingPeriodStart && !record.reportingPeriodEnd) return "";
-  const start = record.reportingPeriodStart ? new Date(record.reportingPeriodStart).toLocaleDateString() : "";
-  const end = record.reportingPeriodEnd ? new Date(record.reportingPeriodEnd).toLocaleDateString() : "";
+  const start = record.reportingPeriodStart ? new Date(record.reportingPeriodStart).toISOString().slice(0, 10) : "";
+  const end = record.reportingPeriodEnd ? new Date(record.reportingPeriodEnd).toISOString().slice(0, 10) : "";
   return [start, end].filter(Boolean).join(" - ");
 }
 

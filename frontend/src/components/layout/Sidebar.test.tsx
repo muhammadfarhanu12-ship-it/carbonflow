@@ -47,6 +47,20 @@ describe("Sidebar", () => {
     expect(screen.queryByText("Audit Logs")).not.toBeInTheDocument();
   });
 
+  test("shows Shipments only for shipment:view and not for emission:view alone", () => {
+    mocks.useAuth.mockReturnValue({ user: { role: "NO_ACCESS", permissions: ["shipment:view"] } });
+    const view = renderSidebar();
+    expect(screen.getByText("Shipments")).toBeInTheDocument();
+
+    mocks.useAuth.mockReturnValue({ user: { role: "NO_ACCESS", permissions: ["emission:view"] } });
+    view.rerender(
+      <MemoryRouter initialEntries={["/app"]}>
+        <Sidebar />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText("Shipments")).not.toBeInTheDocument();
+  });
+
   test("missing permission data does not crash sidebar", () => {
     mocks.useAuth.mockReturnValue({ user: null });
     renderSidebar();

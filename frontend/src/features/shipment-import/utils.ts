@@ -29,7 +29,7 @@ export const IMPORT_FILE_ACCEPT = {
 } as const;
 
 export const TRANSPORT_MODE_OPTIONS: TransportMode[] = ["ROAD", "RAIL", "AIR", "OCEAN"];
-export const SHIPMENT_STATUS_OPTIONS: ShipmentStatus[] = ["PLANNED", "IN_TRANSIT", "DELAYED", "DELIVERED"];
+export const SHIPMENT_STATUS_OPTIONS: ShipmentStatus[] = ["DRAFT", "SUBMITTED", "PLANNED", "IN_TRANSIT", "DELAYED", "DELIVERED", "CANCELLED", "ARCHIVED"];
 
 export const IMPORT_FIELD_DEFINITIONS: ImportFieldDefinition[] = [
   {
@@ -176,7 +176,7 @@ export const DEFAULT_IMPORT_DEFAULTS: ImportDefaults = {
   supplierName: "Bulk Import Supplier",
   carrier: "Imported Carrier",
   costUsd: 0,
-  status: "IN_TRANSIT",
+  status: "DRAFT",
   transportMode: "ROAD",
   originFallback: "Unknown Origin",
   referencePrefix: "IMP",

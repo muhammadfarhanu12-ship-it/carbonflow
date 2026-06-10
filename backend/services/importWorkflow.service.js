@@ -5,6 +5,7 @@ const AuditService = require("./audit.service");
 const EmissionImportService = require("./emissionImport.service");
 const EmissionFactorService = require("./emissionFactor.service");
 const ImportService = require("./import.service");
+const ShipmentService = require("./shipment.service");
 const SupplierService = require("./supplier.service");
 const ApiError = require("../utils/ApiError");
 
@@ -118,8 +119,8 @@ function normalizeImportLog(log = {}) {
 
 function shipmentTemplate() {
   return [
-    "shipmentReference,origin,destination,mode,carrier,distanceKm,weightKg,cost,currency,shipmentDate",
-    "EXAMPLE-SHP-001,Example Origin,Example Destination,ROAD,Example Carrier,100,1000,250,USD,2026-01-15",
+    "shipmentReference,bolNumber,containerId,origin,originCountry,destination,destinationCountry,mode,carrier,linkedSupplierName,distanceKm,weightKg,cost,currency,shipmentDate,status,notes",
+    "EXAMPLE-SHP-001,BOL-001,CONT-001,Example Origin,PK,Example Destination,NL,ROAD,Example Carrier,Example Supplier,100,1000,250,USD,2026-01-15,DRAFT,Example shipment row",
   ].join("\n");
 }
 
@@ -151,7 +152,7 @@ function financialLedgerTemplate() {
 const IMPORT_TYPES = {
   shipment: {
     label: "Shipments",
-    permission: "shipment:create",
+    permission: "shipment:import",
     template: shipmentTemplate,
   },
   emission_activity: {
@@ -197,23 +198,37 @@ function normalizeShipmentRow(row = {}) {
   return {
     rowIndex: row.rowNumber,
     reference: row.row.shipmentReference || row.row.reference,
+    shipmentReference: row.row.shipmentReference || row.row.reference,
+    bolNumber: row.row.bolNumber || row.row.billOfLading,
+    containerId: row.row.containerId,
     origin: row.row.origin,
+    originCountry: row.row.originCountry,
+    originRegion: row.row.originRegion,
     destination: row.row.destination,
+    destinationCountry: row.row.destinationCountry,
+    destinationRegion: row.row.destinationRegion,
     transportMode: row.row.mode || row.row.transportMode,
     carrier: row.row.carrier,
+    linkedSupplierId: row.row.linkedSupplierId || row.row.supplierId,
+    supplierName: row.row.linkedSupplierName || row.row.supplierName,
     distanceKm: row.row.distanceKm,
     weightKg: row.row.weightKg,
     costUsd: row.row.cost || row.row.costUsd,
+    cost: row.row.cost || row.row.costUsd,
     currency: row.row.currency || "USD",
     shipmentDate: row.row.shipmentDate,
+    reportingPeriod: row.row.reportingPeriod,
+    status: row.row.status,
+    notes: row.row.notes,
     rawData: row.row,
   };
 }
 
-function previewShipments(csv) {
+async function previewShipments(csv, companyId) {
   const parsed = parseCsv(csv);
   const duplicates = duplicateWarnings(parsed, (row) => String(row.shipmentReference || row.reference || "").trim().toLowerCase());
-  const rows = parsed.map((item) => {
+  const rows = [];
+  for (const item of parsed) {
     const payload = normalizeShipmentRow(item);
     const errors = [];
     const warnings = [];
@@ -221,14 +236,44 @@ function previewShipments(csv) {
     if (!payload.origin) errors.push("origin is required");
     if (!payload.destination) errors.push("destination is required");
     if (!["ROAD", "RAIL", "AIR", "OCEAN", "SEA"].includes(String(payload.transportMode || "").trim().toUpperCase())) errors.push("mode must be ROAD, RAIL, AIR, or OCEAN");
-    if (!Number.isFinite(Number(payload.distanceKm)) || Number(payload.distanceKm) < 0) errors.push("distanceKm must be zero or greater");
+    if (!Number.isFinite(Number(payload.distanceKm)) || Number(payload.distanceKm) <= 0) errors.push("distanceKm must be greater than 0");
     if (!Number.isFinite(Number(payload.weightKg)) || Number(payload.weightKg) <= 0) errors.push("weightKg must be greater than 0");
     if (!Number.isFinite(Number(payload.costUsd)) || Number(payload.costUsd) < 0) errors.push("cost must be zero or greater");
     if (!isValidDate(payload.shipmentDate)) errors.push("shipmentDate must be a valid date");
+    if (payload.currency && !/^[A-Za-z]{3}$/.test(String(payload.currency).trim())) errors.push("currency must be a three-letter code");
     if (duplicates[String(payload.reference || "").trim().toLowerCase()] > 1) warnings.push("Duplicate shipmentReference in CSV.");
-    return { rowNumber: item.rowNumber, valid: errors.length === 0, errors, warnings, payload };
+    let estimatedTco2e = 0;
+    let calculationStatus = "missing_factor";
+    let emissionFactorType = "missing";
+    if (errors.length === 0) {
+      const calculation = await ShipmentService.calculateFields({
+        ...payload,
+        transportMode: payload.transportMode,
+        shipmentDate: payload.shipmentDate,
+      }, companyId);
+      estimatedTco2e = Number(calculation.tCO2e || calculation.emissionsTonnes || 0);
+      calculationStatus = calculation.calculationStatus;
+      emissionFactorType = calculation.emissionFactorType;
+      warnings.push(...(calculation.dataQualityWarnings || []));
+    }
+    rows.push({
+      rowNumber: item.rowNumber,
+      valid: errors.length === 0,
+      errors,
+      warnings: Array.from(new Set(warnings)),
+      payload: {
+        ...payload,
+        estimatedTco2e,
+        calculationStatus,
+        emissionFactorType,
+      },
+    });
+  }
+  return buildPreview("shipment", rows, {
+    estimatedTco2e: Number(rows.reduce((sum, row) => sum + Number(row.payload?.estimatedTco2e || 0), 0).toFixed(4)),
+    missingFactorRows: rows.filter((row) => row.payload?.calculationStatus === "missing_factor").length,
+    sampleFactorRows: rows.filter((row) => row.payload?.emissionFactorType === "sample").length,
   });
-  return buildPreview("shipment", rows);
 }
 
 function previewSuppliers(csv) {
@@ -422,7 +467,7 @@ class ImportWorkflowService {
     if (!String(csv || "").trim()) throw new ApiError(422, "CSV content is required.");
     if (normalized === "emission_activity") result = normalizeExternalPreview(normalized, await EmissionImportService.preview(csv, companyId));
     else if (normalized === "emission_factor") result = normalizeExternalPreview(normalized, await EmissionFactorService.previewImport(csv, { ...actor, companyId }));
-    else if (normalized === "shipment") result = previewShipments(csv);
+    else if (normalized === "shipment") result = await previewShipments(csv, companyId);
     else if (normalized === "supplier") result = previewSuppliers(csv);
     else if (normalized === "financial_ledger") result = await previewFinancialLedger(csv, companyId);
 
@@ -487,8 +532,8 @@ class ImportWorkflowService {
       const importResult = await ImportService.importShipments({
         shipments: validRows.map((row) => row.payload),
         metadata: { source: "csv", fileName: meta.fileName || preview.fileName || "CSV upload", uploadId: meta.importId || randomUUID() },
-      }, companyId);
-      created = new Array(importResult.summary.inserted || importResult.summary.successful || 0).fill(null);
+      }, companyId, actor);
+      created = importResult.createdRecords || [];
       result = {
         ...preview,
         createdCount: importResult.summary.inserted,

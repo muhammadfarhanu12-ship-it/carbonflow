@@ -4,6 +4,7 @@ const ApprovalsService = require("../services/approvals.service");
 const EmissionRecordService = require("../services/emissionRecord.service");
 const NavigationService = require("../services/navigation.service");
 const AuditService = require("../services/audit.service");
+const ShipmentService = require("../services/shipment.service");
 const { EmissionFactor, AuditLog, EmissionRecord, SupplierEvidence, MarketplaceBudgetRequest, OffsetTransaction, Report } = require("../models");
 
 describe("user-side enterprise workflow endpoints", () => {
@@ -107,6 +108,12 @@ describe("user-side enterprise workflow endpoints", () => {
 
   test("shipment preview validates rows and flags duplicates", async () => {
     jest.spyOn(AuditService, "log").mockResolvedValue({ _id: "preview-1" });
+    jest.spyOn(ShipmentService, "calculateFields").mockResolvedValue({
+      tCO2e: 0.12,
+      calculationStatus: "estimated",
+      emissionFactorType: "sample",
+      dataQualityWarnings: ["Sample factor used."],
+    });
     const csv = [
       "shipmentReference,origin,destination,mode,carrier,distanceKm,weightKg,cost,currency,shipmentDate",
       "SHP-1,New York,Chicago,ROAD,Carrier,1200,1000,1200,USD,2026-05-15",

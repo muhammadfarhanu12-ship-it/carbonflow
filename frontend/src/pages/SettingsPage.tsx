@@ -15,8 +15,10 @@ import { hasPermission, NO_PERMISSION_MESSAGE } from "@/src/utils/permissions";
 const initialTeamForm = {
   name: "",
   email: "",
-  role: "ANALYST" as UserRole,
+  role: "DATA_ENTRY" as UserRole,
 };
+
+const TEAM_PERMISSION_MESSAGE = "Your role does not have permission to manage workspace users. Ask an Owner or Admin for access.";
 
 export function SettingsPage() {
   const { showToast } = useToast();
@@ -31,6 +33,7 @@ export function SettingsPage() {
   const canManageIntegrations = hasPermission(session.user, "settings:integrations:manage");
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [team, setTeam] = useState<ManagedUser[]>([]);
+  const [pendingInvites, setPendingInvites] = useState<ManagedUser[]>([]);
   const [teamForm, setTeamForm] = useState(initialTeamForm);
   const [loading, setLoading] = useState(true);
   const [loadingTeam, setLoadingTeam] = useState(false);
@@ -63,8 +66,12 @@ export function SettingsPage() {
 
     setLoadingTeam(true);
     try {
-      const response = await userService.listUsers("?pageSize=25");
-      setTeam(response.data);
+      const [teamMembers, invites] = await Promise.all([
+        userService.listTeam(),
+        userService.listPendingInvites(),
+      ]);
+      setTeam(teamMembers);
+      setPendingInvites(invites);
     } catch (teamError) {
       setError(teamError instanceof Error ? teamError.message : "Failed to load workspace users");
     } finally {
@@ -120,7 +127,7 @@ export function SettingsPage() {
   const createTeamUser = async () => {
     setSavingTab("team-create");
     try {
-      await userService.createUser({
+      await userService.inviteUser({
         ...teamForm,
         status: "INVITED",
       });
@@ -137,6 +144,15 @@ export function SettingsPage() {
       setSavingTab("");
     }
   };
+
+  const roleOptions = useMemo<UserRole[]>(() => {
+    const currentRole = String(session.user?.role || "").toUpperCase();
+    if (currentRole === "OWNER" || currentRole === "SUPERADMIN") {
+      return ["OWNER", "ADMIN", "MANAGER", "DATA_ENTRY", "VIEWER", "AUDITOR"];
+    }
+
+    return ["ADMIN", "MANAGER", "DATA_ENTRY", "VIEWER", "AUDITOR"];
+  }, [session.user?.role]);
 
   const tabs = useMemo(() => ([
     { key: "profile", label: "Profile", icon: UserRound },
@@ -316,7 +332,7 @@ export function SettingsPage() {
                         <div className="space-y-2">
                           <Label>Role</Label>
                           <select className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm" value={teamForm.role} onChange={(event) => setTeamForm((prev) => ({ ...prev, role: event.target.value as UserRole }))}>
-                            {["ADMIN", "MANAGER", "DATA_ENTRY", "VIEWER", "AUDITOR"].map((role) => <option key={role} value={role}>{role}</option>)}
+                            {roleOptions.map((role) => <option key={role} value={role}>{role}</option>)}
                           </select>
                         </div>
                         <div className="flex items-end">
@@ -351,20 +367,20 @@ export function SettingsPage() {
                                 </td>
                                 <td className="px-4 py-4">
                                   <select className="rounded-md border border-input bg-background px-2 py-1 text-sm" value={member.role} onChange={async (event) => {
-                                    await userService.updateUser(member.id, { role: event.target.value as UserRole });
+                                    await userService.updateUserRole(member.id, event.target.value as UserRole);
                                     await loadTeam();
                                   }}>
-                                    {["ADMIN", "MANAGER", "DATA_ENTRY", "VIEWER", "AUDITOR"].map((role) => <option key={role} value={role}>{role}</option>)}
+                                    {roleOptions.map((role) => <option key={role} value={role}>{role}</option>)}
                                   </select>
                                 </td>
                                 <td className="px-4 py-4">{member.status}</td>
                                 <td className="px-4 py-4">{member.lastLoginAt ? new Date(member.lastLoginAt).toLocaleString() : "Never"}</td>
                                 <td className="px-4 py-4 text-right">
                                   <Button variant="ghost" size="sm" className="text-destructive" onClick={async () => {
-                                    await userService.updateUser(member.id, { status: "SUSPENDED" });
+                                    await userService.updateUserStatus(member.id, member.status === "SUSPENDED" ? "ACTIVE" : "SUSPENDED");
                                     await loadTeam();
                                   }}>
-                                    Deactivate
+                                    {member.status === "SUSPENDED" ? "Reactivate" : "Deactivate"}
                                   </Button>
                                 </td>
                               </tr>
@@ -372,9 +388,61 @@ export function SettingsPage() {
                           </tbody>
                         </table>
                       </div>
+
+                      <div className="space-y-3">
+                        <div>
+                          <h3 className="text-sm font-semibold text-foreground">Pending invites</h3>
+                          <p className="text-sm text-muted-foreground">Invited users stay pending until they complete onboarding.</p>
+                        </div>
+                        <div className="overflow-x-auto rounded-xl border">
+                          <table className="w-full text-left text-sm">
+                            <thead className="border-b bg-muted/50 text-muted-foreground">
+                              <tr>
+                                <th className="px-4 py-3 font-medium">Invitee</th>
+                                <th className="px-4 py-3 font-medium">Role</th>
+                                <th className="px-4 py-3 font-medium">Status</th>
+                                <th className="px-4 py-3 font-medium text-right">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border">
+                              {loadingTeam ? (
+                                <tr><td colSpan={4} className="px-4 py-4 text-center text-muted-foreground">Loading invites...</td></tr>
+                              ) : pendingInvites.length === 0 ? (
+                                <tr><td colSpan={4} className="px-4 py-4 text-center text-muted-foreground">No pending invites.</td></tr>
+                              ) : pendingInvites.map((invite) => (
+                                <tr key={invite.id}>
+                                  <td className="px-4 py-4">
+                                    <div className="font-medium text-foreground">{invite.name}</div>
+                                    <div className="text-xs text-muted-foreground">{invite.email}</div>
+                                  </td>
+                                  <td className="px-4 py-4">{invite.role}</td>
+                                  <td className="px-4 py-4">{invite.status}</td>
+                                  <td className="px-4 py-4 text-right">
+                                    <div className="flex justify-end gap-2">
+                                      <Button variant="outline" size="sm" onClick={async () => {
+                                        await userService.resendInvite(invite.id);
+                                        showToast({ tone: "success", title: "Invite resent", description: `${invite.email} has been resent an invite.` });
+                                        await loadTeam();
+                                      }}>
+                                        Resend
+                                      </Button>
+                                      <Button variant="ghost" size="sm" className="text-destructive" onClick={async () => {
+                                        await userService.cancelInvite(invite.id);
+                                        await loadTeam();
+                                      }}>
+                                        Cancel
+                                      </Button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
                     </>
                   ) : (
-                    <p className="text-sm text-muted-foreground">Your role does not have permission to manage workspace users.</p>
+                    <p className="text-sm text-muted-foreground">{TEAM_PERMISSION_MESSAGE}</p>
                   )}
                 </CardContent>
               </Card>

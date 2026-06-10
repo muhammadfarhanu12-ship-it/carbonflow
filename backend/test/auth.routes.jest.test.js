@@ -183,6 +183,39 @@ describe("auth routes", () => {
     expect(response.body.message).toMatch(/suspended/i);
   });
 
+  test("POST /auth/login returns token and safe user payload for valid credentials", async () => {
+    const user = createMockUser({
+      email: "valid@example.com",
+      refreshTokenHash: "old-hash",
+    });
+    mockUserScopeFindOne.mockResolvedValue(user);
+
+    const bcrypt = require("bcryptjs");
+    jest.spyOn(bcrypt, "compare").mockResolvedValue(true);
+
+    const response = await request(app).post("/auth/login").send({
+      email: "valid@example.com",
+      password: "StrongPass1!",
+      rememberMe: true,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.token).toEqual(expect.any(String));
+    expect(response.body.data.accessToken).toEqual(expect.any(String));
+    expect(response.body.data.refreshToken).toEqual(expect.any(String));
+    expect(response.body.data.user).toMatchObject({
+      id: user.id,
+      email: "valid@example.com",
+      role: "ANALYST",
+      companyId: "company-1",
+      organizationId: "company-1",
+    });
+    expect(response.body.data.user.password).toBeUndefined();
+    expect(response.body.data.user.refreshTokenHash).toBeUndefined();
+    expect(user.save).toHaveBeenCalled();
+  });
+
   test("GET /auth/verify-email returns method guidance", async () => {
     const response = await request(app).get("/auth/verify-email");
 
@@ -245,6 +278,40 @@ describe("auth routes", () => {
     expect(response.status).toBe(401);
     expect(response.body.success).toBe(false);
     expect(response.body.message).toMatch(/expired/i);
+  });
+
+  test("GET /auth/me returns the safe authenticated user payload", async () => {
+    const user = createMockUser({
+      id: "me-user-1",
+      email: "me@example.com",
+      role: "ADMIN",
+      companyId: "company-99",
+      refreshTokenHash: "stored-hash",
+    });
+    mockUserFindById.mockResolvedValue(user);
+    mockEnsureCompanyContext.mockResolvedValue(user);
+    const accessToken = jwt.sign(
+      { sub: user.id, role: user.role, companyId: user.companyId },
+      process.env.JWT_SECRET,
+      { expiresIn: "10m" },
+    );
+
+    const response = await request(app)
+      .get("/auth/me")
+      .set("Authorization", `Bearer ${accessToken}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.data).toEqual({
+      id: "me-user-1",
+      email: "me@example.com",
+      name: "Test User",
+      role: "ADMIN",
+      companyId: "company-99",
+      organizationId: "company-99",
+    });
+    expect(response.body.data.password).toBeUndefined();
+    expect(response.body.data.refreshTokenHash).toBeUndefined();
   });
 
   test("POST /auth/logout clears refresh token for authenticated user", async () => {

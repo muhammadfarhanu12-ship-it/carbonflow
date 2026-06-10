@@ -9,7 +9,7 @@ const workflowController = require("../controllers/importWorkflow.controller");
 const router = express.Router();
 
 const IMPORT_TYPE_PERMISSION = {
-  shipment: "shipment:create",
+  shipment: "shipment:import",
   emission_activity: "emission:create",
   supplier: "supplier:create",
   emission_factor: "factor:manage",
@@ -28,6 +28,11 @@ function requireImportCommitForType(req, res, next) {
   return requirePermission("import:commit")(req, res, next);
 }
 
+function requireLegacyShipmentImport(req, res, next) {
+  req.params.type = "shipment";
+  return requireImportCommitForType(req, res, next);
+}
+
 router.use(authenticate);
 router.use(importRateLimiter);
 
@@ -40,6 +45,6 @@ router.get("/imports/:type/template", requirePermission("import:view"), asyncHan
 router.post("/imports/:type/preview", requireImportCreateForType, asyncHandler(workflowController.preview));
 router.post("/imports/:id/commit", requireAnyPermission(["import:commit", "import:create"]), asyncHandler(workflowController.commitById));
 router.post("/imports/:type/commit", requireImportCommitForType, asyncHandler(workflowController.commit));
-router.post("/import", asyncHandler(controller.importShipments));
+router.post("/import", requireLegacyShipmentImport, asyncHandler(controller.importShipments));
 
 module.exports = router;

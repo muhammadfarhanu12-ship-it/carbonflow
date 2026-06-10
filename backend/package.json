@@ -9,8 +9,11 @@
     "server": "node server.js",
     "seed": "node -r dotenv/config seed/index.js",
     "seed:admin": "node -r dotenv/config seed/adminUser.js",
+    "make-owner": "node scripts/make-owner.js",
     "test": "node -r ./register-ts-runtime.js --test test/ai.controller.test.js test/ai.service.test.js --experimental-test-isolation=none",
-    "test:jest": "jest --runInBand --config jest.config.js"
+    "test:jest": "jest --runInBand --config jest.config.js",
+    "test:shipment": "jest --runInBand --config jest.config.js --runTestsByPath test/shipment.service.jest.test.js test/shipment.routes.jest.test.js test/import.routes.jest.test.js test/import.service.jest.test.js",
+    "test:ci": "npm run test && npm run test:jest"
   },
   "dependencies": {
     "@google/genai": "^1.50.1",

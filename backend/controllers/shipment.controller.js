@@ -51,6 +51,24 @@ exports.update = async (req, res) => {
   });
 };
 
+exports.recalculate = async (req, res) => {
+  const shipment = await ShipmentService.recalculate(req.params.id, req.user.companyId, req.user);
+  req.io.emit("shipmentUpdated", shipment);
+  return sendSuccess(res, {
+    message: "Shipment recalculated successfully",
+    data: shipment,
+  });
+};
+
+exports.archive = async (req, res) => {
+  const shipment = await ShipmentService.archive(req.params.id, req.user.companyId, req.user);
+  req.io.emit("shipmentUpdated", shipment);
+  return sendSuccess(res, {
+    message: "Shipment archived successfully",
+    data: shipment,
+  });
+};
+
 exports.remove = async (req, res) => {
   const response = await ShipmentService.remove(req.params.id, req.user.companyId, req.user);
   req.io.emit("shipmentDeleted", { id: req.params.id });

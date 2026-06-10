@@ -14,7 +14,14 @@ export type Permission =
   | "factor:manage"
   | "factor:import"
   | "factor:audit:view"
+  | "shipment:view"
   | "shipment:create"
+  | "shipment:update"
+  | "shipment:archive"
+  | "shipment:import"
+  | "shipment:recalculate"
+  | "shipment:link_supplier"
+  | "shipment:create_ledger_record"
   | "import:view"
   | "import:create"
   | "import:commit"
@@ -85,7 +92,14 @@ const ALL_PERMISSIONS: Permission[] = [
   "factor:manage",
   "factor:import",
   "factor:audit:view",
+  "shipment:view",
   "shipment:create",
+  "shipment:update",
+  "shipment:archive",
+  "shipment:import",
+  "shipment:recalculate",
+  "shipment:link_supplier",
+  "shipment:create_ledger_record",
   "import:view",
   "import:create",
   "import:commit",
@@ -147,7 +161,14 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "factor:manage",
     "factor:import",
     "factor:audit:view",
+    "shipment:view",
     "shipment:create",
+    "shipment:update",
+    "shipment:archive",
+    "shipment:import",
+    "shipment:recalculate",
+    "shipment:link_supplier",
+    "shipment:create_ledger_record",
     "import:view",
     "import:create",
     "import:commit",
@@ -183,14 +204,11 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "settings:profile:update",
     "settings:organization:update",
     "settings:emissions:update",
-    "settings:team:manage",
     "settings:security:update",
-    "settings:api_keys:manage",
-    "settings:integrations:manage",
   ],
-  data_entry: ["supplier:view", "supplier:create", "supplier:update", "supplier:evidence:view", "shipment:create", "report:view", "emission:view", "emission:create", "emission:update", "emission:submit", "import:view", "import:create", "import:commit", "optimization:view", "marketplace:view", "settings:view", "settings:profile:update", "settings:security:update"],
-  viewer: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "report:view", "emission:view", "factor:view", "import:view", "optimization:view", "marketplace:view", "settings:view"],
-  auditor: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "supplier:audit:view", "factor:audit:view", "report:view", "report:download", "emission:view", "factor:view", "import:view", "approvals:view", "audit:view", "audit:export", "optimization:view", "marketplace:view", "settings:view"],
+  data_entry: ["supplier:view", "supplier:create", "supplier:update", "supplier:evidence:view", "shipment:view", "shipment:create", "shipment:update", "shipment:import", "shipment:recalculate", "shipment:link_supplier", "report:view", "emission:view", "emission:create", "emission:update", "emission:submit", "import:view", "import:create", "import:commit", "optimization:view", "marketplace:view", "settings:view", "settings:profile:update", "settings:security:update"],
+  viewer: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "shipment:view", "report:view", "emission:view", "factor:view", "import:view", "optimization:view", "marketplace:view", "settings:view"],
+  auditor: ["supplier:view", "supplier:score:view", "supplier:evidence:view", "supplier:audit:view", "factor:audit:view", "shipment:view", "report:view", "report:download", "emission:view", "factor:view", "import:view", "approvals:view", "audit:view", "audit:export", "optimization:view", "marketplace:view", "settings:view"],
 };
 
 export const NO_PERMISSION_MESSAGE = "You do not have permission to perform this action.";

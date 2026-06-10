@@ -24,6 +24,11 @@ function toSafeUser(user) {
   };
 }
 
+function normalizeUserRole(role, fallback = "ANALYST") {
+  const normalizedRole = String(role || fallback).toUpperCase();
+  return USER_ROLES.includes(normalizedRole) ? normalizedRole : fallback;
+}
+
 function isPrivileged(role) {
   return ["OWNER", "ADMIN", "MANAGER", "SUPERADMIN"].includes(String(role || "").toUpperCase());
 }
@@ -64,6 +69,15 @@ async function ensureUniqueEmail(email, excludeId = null) {
   if (existingUser) {
     throw new ApiError(409, "A user with that email already exists");
   }
+}
+
+async function countActiveOwners(companyId, excludeId = null) {
+  return User.countDocuments({
+    companyId,
+    role: "OWNER",
+    status: "ACTIVE",
+    ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+  });
 }
 
 class UserService {
@@ -108,7 +122,7 @@ class UserService {
       throw new ApiError(403, "You do not have permission to create users");
     }
 
-    const nextRole = String(payload.role || "ANALYST").toUpperCase();
+    const nextRole = normalizeUserRole(payload.role, "ANALYST");
     if (!canAssignRole(requester.role, nextRole)) {
       throw new ApiError(403, "You do not have permission to assign that role");
     }
@@ -143,6 +157,40 @@ class UserService {
     });
 
     return toSafeUser(createdUser);
+  }
+
+  static async listTeamMembers(requester) {
+    if (!isPrivileged(requester.role)) {
+      throw new ApiError(403, "You do not have permission to manage workspace users");
+    }
+
+    const filter = requester.role === "SUPERADMIN"
+      ? {}
+      : { companyId: requester.companyId };
+
+    const rows = await User.find(filter).sort({ createdAt: -1 }).populate("company");
+    return rows.map((user) => toSafeUser(user));
+  }
+
+  static async listPendingInvites(requester) {
+    if (!isPrivileged(requester.role)) {
+      throw new ApiError(403, "You do not have permission to manage workspace users");
+    }
+
+    const filter = requester.role === "SUPERADMIN"
+      ? { status: "INVITED" }
+      : { companyId: requester.companyId, status: "INVITED" };
+
+    const rows = await User.find(filter).sort({ createdAt: -1 }).populate("company");
+    return rows.map((user) => toSafeUser(user));
+  }
+
+  static async inviteUser(payload, requester) {
+    return this.createUser({
+      ...payload,
+      role: normalizeUserRole(payload.role, "ANALYST"),
+      status: "INVITED",
+    }, requester);
   }
 
   static async getUserById(id, requester) {
@@ -238,15 +286,21 @@ class UserService {
       throw new ApiError(403, "You do not have permission to assign that role");
     }
 
-    if (payload.role && id === requester.id && ["OWNER", "ADMIN", "SUPERADMIN"].includes(String(user.role).toUpperCase())) {
-      const remainingAdmins = await User.countDocuments({
-        companyId: requester.companyId,
-        _id: { $ne: id },
-        role: { $in: ["OWNER", "ADMIN", "SUPERADMIN"] },
-        status: "ACTIVE",
-      });
-      if (remainingAdmins === 0) {
-        throw new ApiError(422, "You cannot demote yourself as the last workspace administrator.");
+    const currentRole = String(user.role || "").toUpperCase();
+    const nextRole = payload.role ? normalizeUserRole(payload.role, currentRole) : currentRole;
+    const nextStatus = payload.status ? String(payload.status).toUpperCase() : String(user.status || "").toUpperCase();
+
+    if (currentRole === "OWNER" && nextRole !== "OWNER") {
+      const remainingOwners = await countActiveOwners(user.companyId, id);
+      if (remainingOwners === 0) {
+        throw new ApiError(422, "Cannot demote the last workspace owner.");
+      }
+    }
+
+    if (currentRole === "OWNER" && nextStatus !== "ACTIVE") {
+      const remainingOwners = await countActiveOwners(user.companyId, id);
+      if (remainingOwners === 0) {
+        throw new ApiError(422, "Cannot deactivate the last workspace owner.");
       }
     }
 
@@ -260,8 +314,8 @@ class UserService {
     Object.assign(user, {
       name: payload.name ?? user.name,
       email: payload.email ?? user.email,
-      role: payload.role ?? user.role,
-      status: payload.status ?? user.status,
+      role: nextRole,
+      status: nextStatus,
     });
 
     if (payload.password) {
@@ -270,12 +324,19 @@ class UserService {
 
     await user.save();
     const updatedUser = await User.findById(id).populate("company");
-    const roleChanged = payload.role && String(payload.role).toUpperCase() !== String(oldValue.role).toUpperCase();
+    const roleChanged = nextRole !== String(oldValue.role).toUpperCase();
+    const statusChanged = nextStatus !== String(oldValue.status).toUpperCase();
     await AuditService.log({
       companyId: requester.companyId,
       userId: requester.id,
       userEmail: requester.email,
-      action: roleChanged ? "user_role_changed" : (payload.status === "SUSPENDED" ? "user_deactivated" : "user_updated"),
+      action: roleChanged
+        ? "user_role_changed"
+        : statusChanged && nextStatus === "SUSPENDED"
+          ? "user_deactivated"
+          : statusChanged && nextStatus === "ACTIVE"
+            ? "user_reactivated"
+            : "user_updated",
       entityType: "User",
       entityId: id,
       oldValue,
@@ -311,15 +372,10 @@ class UserService {
       throw new ApiError(403, "You do not have permission to delete this user");
     }
 
-    if (["OWNER", "ADMIN", "SUPERADMIN"].includes(String(user.role).toUpperCase())) {
-      const remainingAdmins = await User.countDocuments({
-        companyId: requester.companyId,
-        _id: { $ne: id },
-        role: { $in: ["OWNER", "ADMIN", "SUPERADMIN"] },
-        status: "ACTIVE",
-      });
-      if (remainingAdmins === 0) {
-        throw new ApiError(422, "Cannot remove the last workspace administrator.");
+    if (String(user.role).toUpperCase() === "OWNER") {
+      const remainingOwners = await countActiveOwners(user.companyId, id);
+      if (remainingOwners === 0) {
+        throw new ApiError(422, "Cannot remove the last workspace owner.");
       }
     }
 
@@ -334,6 +390,82 @@ class UserService {
       details: { deletedUserId: id },
     });
     return { id };
+  }
+
+  static async updateUserRole(id, role, requester) {
+    return this.updateUser(id, { role: normalizeUserRole(role) }, requester);
+  }
+
+  static async updateUserStatus(id, status, requester) {
+    return this.updateUser(id, { status: String(status || "").toUpperCase() }, requester);
+  }
+
+  static async resendInvite(id, requester) {
+    if (!isPrivileged(requester.role)) {
+      throw new ApiError(403, "You do not have permission to manage workspace users");
+    }
+
+    const filter = requester.role === "SUPERADMIN"
+      ? { _id: id, status: "INVITED" }
+      : { _id: id, companyId: requester.companyId, status: "INVITED" };
+    const user = await User.findOne(filter);
+    if (!user) {
+      throw new ApiError(404, "Pending invite not found");
+    }
+
+    await AuditService.log({
+      companyId: user.companyId,
+      userId: requester.id,
+      userEmail: requester.email,
+      action: "user_invite_resent",
+      entityType: "User",
+      entityId: user.id,
+      details: {
+        invitedUserId: user.id,
+        invitedUserEmail: user.email,
+      },
+    });
+
+    return toSafeUser(user);
+  }
+
+  static async cancelInvite(id, requester) {
+    if (!isPrivileged(requester.role)) {
+      throw new ApiError(403, "You do not have permission to manage workspace users");
+    }
+
+    const filter = requester.role === "SUPERADMIN"
+      ? { _id: id, status: "INVITED" }
+      : { _id: id, companyId: requester.companyId, status: "INVITED" };
+    const user = await User.findOne(filter);
+    if (!user) {
+      throw new ApiError(404, "Pending invite not found");
+    }
+
+    const oldValue = {
+      role: user.role,
+      status: user.status,
+      email: user.email,
+    };
+    user.status = "SUSPENDED";
+    await user.save();
+
+    await AuditService.log({
+      companyId: user.companyId,
+      userId: requester.id,
+      userEmail: requester.email,
+      action: "user_invite_cancelled",
+      entityType: "User",
+      entityId: user.id,
+      oldValue,
+      newValue: {
+        role: user.role,
+        status: user.status,
+        email: user.email,
+      },
+    });
+
+    return toSafeUser(user);
   }
 }
 

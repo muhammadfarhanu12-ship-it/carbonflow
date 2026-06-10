@@ -34,6 +34,26 @@ describe("Carbon Ledger operational scripts", () => {
     expect(result.updates.calculationStatus).toBe("missing_factor");
   });
 
+  test("backfill rebuckets records by reporting period start instead of activity date", async () => {
+    jest.spyOn(EmissionRecordService, "resolveActivityFactor").mockResolvedValue(null);
+    const result = await backfill.buildBackfill({
+      companyId: "company-1",
+      scope: 1,
+      category: "Stationary combustion",
+      activityAmount: 10,
+      activityUnit: "liter",
+      activityData: { activityType: "stationary_fuel", fuelType: "DIESEL" },
+      metadata: { factorKey: "DIESEL" },
+      occurredAt: new Date("2026-05-28T00:00:00.000Z"),
+      reportingPeriodStart: new Date("2026-06-01T00:00:00.000Z"),
+      periodMonth: 5,
+      periodYear: 2026,
+    });
+
+    expect(result.updates.periodMonth).toBe(6);
+    expect(result.updates.periodYear).toBe(2026);
+  });
+
   test("smoke script mutating mode requires explicit credentials", () => {
     expect(() => smoke.readConfig({ SMOKE_RUN_MUTATING_TESTS: "true" })).toThrow(/SMOKE_TEST_EMAIL/);
   });

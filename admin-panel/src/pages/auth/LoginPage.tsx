@@ -4,8 +4,8 @@ import { Leaf, Loader2 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 
 export function LoginPage() {
-  const [email, setEmail] = useState('admin@carbonflow.com');
-  const [password, setPassword] = useState('Admin@12345');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();

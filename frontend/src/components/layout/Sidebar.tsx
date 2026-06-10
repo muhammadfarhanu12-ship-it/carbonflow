@@ -29,7 +29,7 @@ type NavigationItem = {
 
 export const navigation: NavigationItem[] = [
   { name: "Dashboard", href: "/app", icon: LayoutDashboard },
-  { name: "Shipments", href: "/app/shipments", icon: Truck, permissions: ["emission:view"] },
+  { name: "Shipments", href: "/app/shipments", icon: Truck, permissions: ["shipment:view"] },
   { name: "Suppliers", href: "/app/suppliers", icon: Users, permissions: ["supplier:view"] },
   { name: "Carbon Ledger", href: "/app/ledger", icon: BarChart3, permissions: ["emission:view"], badgeKey: "missingFactors" },
   { name: "Emission Factors", href: "/app/emission-factors", icon: Database, permissions: ["factor:view", "factor:manage"], badgeKey: "missingFactors" },

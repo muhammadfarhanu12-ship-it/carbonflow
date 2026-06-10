@@ -18,11 +18,12 @@ const DATA_STATUSES = ["draft", "submitted", "reviewed", "approved", "rejected",
 const REVIEW_ROLES = new Set(["manager", "admin", "owner"]);
 const LOCKED_EDIT_STATUSES = new Set(["submitted", "reviewed", "approved"]);
 
-function getPeriod(occurredAt) {
-  const date = new Date(occurredAt || Date.now());
+function getPeriod(occurredAt, reportingPeriodStart = null) {
+  const date = new Date(reportingPeriodStart || occurredAt || Date.now());
+  const activityDate = new Date(occurredAt || date);
 
   return {
-    occurredAt: date,
+    occurredAt: activityDate,
     periodMonth: date.getUTCMonth() + 1,
     periodYear: date.getUTCFullYear(),
   };
@@ -823,7 +824,7 @@ class EmissionRecordService {
   }
 
   static async upsertRecord(companyId, recordKey, payload) {
-    const period = getPeriod(payload.occurredAt);
+    const period = getPeriod(payload.occurredAt, payload.reportingPeriodStart);
 
     const record = await EmissionRecord.findOneAndUpdate(
       { companyId, recordKey },
@@ -857,6 +858,10 @@ class EmissionRecordService {
 
   static async syncShipmentRecord(shipment, supplier = null) {
     const computed = calculateShipmentEmissions(shipment, shipment.emissionFactorOverrides || {});
+    const factorType = shipment.emissionFactorType || (shipment.calculationStatus === "missing_factor" ? "missing" : "sample");
+    const factorIsSample = factorType === "sample";
+    const factorIsOfficial = factorType === "official";
+    const factorIsCustom = factorType === "custom";
 
     return this.upsertRecord(shipment.companyId, `shipment:${shipment.id || shipment._id}`, {
       scope: 3,
@@ -866,14 +871,28 @@ class EmissionRecordService {
       shipmentId: shipment.id || shipment._id,
       supplierId: shipment.supplierId || null,
       description: `${shipment.reference} ${shipment.origin} to ${shipment.destination}`,
-      amountTonnes: round(shipment.emissionsTonnes ?? computed.emissionsTonnes),
+      amountTonnes: round(shipment.tCO2e ?? shipment.emissionsTonnes ?? computed.emissionsTonnes),
+      emissionsKgCo2e: Number(shipment.kgCO2e ?? shipment.emissionsKgCo2e ?? 0),
+      emissionsTCo2e: Number(shipment.tCO2e ?? shipment.emissionsTonnes ?? computed.emissionsTonnes),
       costUsd: Number(shipment.costUsd || 0),
-      factorValue: computed.factorKgPerTonKm,
-      factorUnit: "kgCO2e/ton-km",
-      factorSource: shipment.factorSource || "CarbonFlow sample logistics factors",
-      factorIsSample: true,
+      factorValue: Number(shipment.emissionFactorValue ?? shipment.emissionFactor ?? computed.factorKgPerTonKm),
+      factorValueUsed: Number(shipment.emissionFactorValue ?? shipment.emissionFactor ?? computed.factorKgPerTonKm),
+      factorUnit: shipment.emissionFactorUnit || "kgCO2e/ton-km",
+      factorUnitUsed: shipment.emissionFactorUnit || "kgCO2e/ton-km",
+      factorSource: shipment.factorSource || shipment.emissionFactorSourceName || "CarbonFlow sample logistics factors",
+      factorSourceName: shipment.emissionFactorSourceName || shipment.factorSource || null,
+      factorSourceYear: shipment.emissionFactorSourceYear || null,
+      factorIsSample,
+      factorIsOfficial,
+      factorIsCustom,
+      emissionFactorId: shipment.emissionFactorId || null,
+      calculationStatus: shipment.calculationStatus || (computed.factorKgPerTonKm > 0 ? "calculated" : "missing_factor"),
+      formula: shipment.calculationFormula || null,
       activityData: {
         reference: shipment.reference,
+        shipmentReference: shipment.shipmentReference || shipment.reference,
+        bolNumber: shipment.bolNumber || null,
+        containerId: shipment.containerId || null,
         origin: shipment.origin,
         destination: shipment.destination,
         carrier: shipment.carrier,
@@ -885,11 +904,15 @@ class EmissionRecordService {
         tonKm: computed.tonKm,
         transportMode: computed.transportMode,
         fuelType: shipment.fuelType || null,
+        reportingPeriod: shipment.reportingPeriod || null,
       },
       metadata: {
         status: shipment.status,
         carbonCostUsd: Number(shipment.carbonCostUsd || 0),
         calculationStatus: shipment.calculationStatus || (computed.factorKgPerTonKm > 0 ? "calculated" : "missing_factor"),
+        emissionFactorType: factorType,
+        linkedSupplierSnapshot: shipment.linkedSupplierSnapshot || null,
+        dataQualityWarnings: shipment.dataQualityWarnings || [],
       },
       occurredAt: shipment.shipmentDate || shipment.createdAt || new Date(),
     });

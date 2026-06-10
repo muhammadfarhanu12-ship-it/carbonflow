@@ -31,7 +31,7 @@ const analyticsValidator = [
 const carbonDataValidator = [
   ...paginationValidators,
   query("search").optional().trim().isLength({ max: 120 }).withMessage("search is too long"),
-  query("status").optional().isIn(["PLANNED", "IN_TRANSIT", "DELAYED", "DELIVERED"]).withMessage("Invalid shipment status"),
+  query("status").optional().isIn(["DRAFT", "SUBMITTED", "PLANNED", "IN_TRANSIT", "DELAYED", "DELIVERED", "CANCELLED", "ARCHIVED"]).withMessage("Invalid shipment status"),
   query("transportMode").optional().isIn(["ROAD", "RAIL", "AIR", "OCEAN"]).withMessage("Invalid transport mode"),
 ];
 

@@ -65,6 +65,17 @@ async function buildBackfill(record, options = {}) {
     updates.reportingPeriodEnd = new Date(Date.UTC(year, month, 0));
   }
 
+  const periodSource = updates.reportingPeriodStart || record.reportingPeriodStart || record.occurredAt;
+  const periodDate = new Date(periodSource || Date.now());
+  if (!Number.isNaN(periodDate.getTime())) {
+    const periodMonth = periodDate.getUTCMonth() + 1;
+    const periodYear = periodDate.getUTCFullYear();
+    if (options.force || record.periodMonth !== periodMonth || record.periodYear !== periodYear) {
+      updates.periodMonth = periodMonth;
+      updates.periodYear = periodYear;
+    }
+  }
+
   if (isMissing(record.archivedAt) && record.dataStatus !== "archived") updates.archivedAt = null;
   if (isMissing(record.archivedBy) && record.dataStatus !== "archived") updates.archivedBy = null;
 

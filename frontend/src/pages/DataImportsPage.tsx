@@ -1,4 +1,6 @@
+// frontend/src/pages/DataImportsPage.tsx
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Download, Eye, FileWarning, Search, Upload, X } from "lucide-react";
 import { Button } from "@/src/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card";
@@ -17,7 +19,7 @@ const importTypes: Array<{
   optionalColumns: string[];
   notes: string[];
 }> = [
-  { value: "shipment", label: "Shipments", supported: true, requiredPermission: "shipment:create", requiredColumns: ["shipmentReference", "origin", "destination", "mode", "distanceKm", "weightKg", "shipmentDate"], optionalColumns: ["carrier", "cost", "currency"], notes: ["Mode must be ROAD, RAIL, AIR, or OCEAN.", "Invalid rows are never saved."] },
+  { value: "shipment", label: "Shipments", supported: true, requiredPermission: "shipment:import", requiredColumns: ["shipmentReference", "origin", "destination", "mode", "distanceKm", "weightKg", "shipmentDate"], optionalColumns: ["bolNumber", "containerId", "originCountry", "destinationCountry", "carrier", "linkedSupplierName", "cost", "currency", "status", "notes"], notes: ["Mode must be ROAD, RAIL, AIR, or OCEAN.", "Rows are previewed before commit and emission factors are checked server-side."] },
   { value: "emission_activity", label: "Carbon Ledger Activities", supported: true, requiredPermission: "emission:create", requiredColumns: ["scope", "category", "activityType", "activityAmount", "activityUnit", "factorKey", "reportingPeriodStart", "reportingPeriodEnd", "activityDate"], optionalColumns: ["facility", "businessUnit", "country", "region", "supplier", "notes"], notes: ["Preview performs factor matching.", "Missing factors block rows. Sample factors are warned."] },
   { value: "supplier", label: "Suppliers", supported: true, requiredPermission: "supplier:create", requiredColumns: ["name"], optionalColumns: ["contactEmail", "country", "region", "category", "totalEmissions", "revenueOrActivityBase", "transparencyScore", "complianceProxy", "verificationStatus", "notes"], notes: ["Scores must be between 0 and 100.", "Emails are validated when supplied."] },
   { value: "emission_factor", label: "Emission Factors", supported: true, requiredPermission: "factor:manage", requiredColumns: ["scope", "category", "activityType", "factorKey", "activityUnit", "factorValue", "factorUnit", "sourceName", "sourceYear"], optionalColumns: ["sourceUrl", "methodology", "country", "region", "version", "effectiveFrom", "effectiveTo", "notes"], notes: ["User-side imports create company custom factors.", "Sample factors cannot be imported as official factors."] },
@@ -26,6 +28,7 @@ const importTypes: Array<{
 
 export function DataImportsPage() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const canView = hasPermission(user, "import:view") || hasPermission(user, "import:create");
   const canCreate = hasPermission(user, "import:create");
   const canCommit = canCreate || hasPermission(user, "import:commit");
@@ -41,8 +44,16 @@ export function DataImportsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    const requestedType = searchParams.get("type");
+    if (requestedType && importTypes.some((item) => item.value === requestedType)) {
+      setType(requestedType as ImportType);
+    }
+  }, [searchParams]);
+
   const selectedType = useMemo(() => importTypes.find((item) => item.value === type), [type]);
   const canImportSelectedType = Boolean(canCreate || (selectedType?.requiredPermission && hasPermission(user, selectedType.requiredPermission)));
+  const validRowCount = Number(preview?.validRows || 0);
 
   const loadHistory = async () => {
     setLoading(true);
@@ -123,10 +134,10 @@ export function DataImportsPage() {
               {selectedType ? <ImportTypeGuidance type={selectedType} /> : null}
               {!canImportSelectedType ? <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">This import requires {selectedType?.requiredPermission} access.</div> : null}
               {!selectedType?.supported ? <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">This import type is listed for workflow visibility, but commit support is not enabled yet.</div> : null}
-              <textarea className="min-h-40 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={csv} onChange={(event) => setCsv(event.target.value)} placeholder="Paste CSV data here" />
+              <textarea className="min-h-40 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={csv} onChange={(event) => { setCsv(event.target.value); setPreview(null); }} placeholder="Paste CSV data here" />
               <div className="flex flex-wrap gap-2">
                 <Button type="button" variant="outline" disabled={!csv.trim() || saving || !canImportSelectedType} onClick={previewImport}><FileWarning className="mr-2 h-4 w-4" />Preview Import</Button>
-                <Button type="button" disabled={!preview?.validRows || saving || !selectedType?.supported || !canCommit} onClick={commitImport}><Upload className="mr-2 h-4 w-4" />Save Valid Rows</Button>
+                <Button type="button" disabled={validRowCount === 0 || saving || !selectedType?.supported || !canCommit} onClick={commitImport}><Upload className="mr-2 h-4 w-4" />{validRowCount > 0 ? `Save ${validRowCount} valid rows` : "Save valid rows"}</Button>
                 {preview ? <Button type="button" variant="outline" onClick={() => setPreview(null)}><X className="mr-2 h-4 w-4" />Cancel Preview</Button> : null}
               </div>
               {preview ? <PreviewTable preview={preview} /> : null}

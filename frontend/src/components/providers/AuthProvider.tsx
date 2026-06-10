@@ -53,10 +53,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      if (session.user && !cancelled) {
-        setUser(session.user);
-      }
-
       try {
         const currentUser = await authService.getCurrentUser();
 
@@ -100,12 +96,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearSessionState, navigate]);
 
   const signin = useCallback(async (data: SigninData) => {
-    const response = await authService.signin(data);
-    authService.setSession(response);
-    setUser(response.user);
-    setIsLoading(false);
-    return response;
-  }, []);
+    setIsLoading(true);
+
+    try {
+      const response = await authService.signin(data);
+      authService.setSession(response);
+      setUser(response.user);
+      setIsLoading(false);
+      return response;
+    } catch (error) {
+      clearSessionState();
+      throw error;
+    }
+  }, [clearSessionState]);
 
   const signup = useCallback(async (data: SignupData) => authService.signup(data), []);
 

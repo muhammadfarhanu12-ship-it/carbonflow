@@ -25,7 +25,7 @@ export type SupplierEvidenceType =
   | "supplier_questionnaire_answers"
   | "other";
 export type SupplierEvidenceStatus = "requested" | "submitted" | "under_review" | "verified" | "rejected" | "expired";
-export type ShipmentStatus = "PLANNED" | "IN_TRANSIT" | "DELAYED" | "DELIVERED";
+export type ShipmentStatus = "DRAFT" | "SUBMITTED" | "PLANNED" | "IN_TRANSIT" | "DELAYED" | "DELIVERED" | "CANCELLED" | "ARCHIVED";
 export type TransportMode = "ROAD" | "RAIL" | "AIR" | "OCEAN";
 export type MarketplaceListingStatus = "DRAFT" | "PENDING_REVIEW" | "PUBLISHED" | "PAUSED" | "ARCHIVED" | "SOLD_OUT";
 export type CarbonRegistry = "VERRA" | "GOLD_STANDARD" | "PURO_EARTH";
@@ -296,31 +296,62 @@ export interface Shipment {
   id: string;
   companyId: string;
   organizationId?: string;
-  supplierId: string;
+  supplierId?: string | null;
+  linkedSupplierId?: string | null;
+  linkedSupplierSnapshot?: {
+    id?: string | null;
+    name?: string | null;
+    category?: string | null;
+    country?: string | null;
+    region?: string | null;
+    riskLevel?: SupplierRiskLevel | null;
+  } | null;
   reference: string;
+  shipmentReference?: string | null;
+  bolNumber?: string | null;
   billOfLading?: string | null;
   containerId?: string | null;
   origin: string;
+  originCountry?: string | null;
+  originRegion?: string | null;
   destination: string;
+  destinationCountry?: string | null;
+  destinationRegion?: string | null;
   distanceKm: number;
   distanceUnit?: "km";
   transportMode: TransportMode;
   carrier: string;
+  carrierId?: string | null;
   vehicleType?: string | null;
   fuelType?: string | null;
   weightKg: number;
   weightUnit?: "kg" | "tonnes";
   costUsd: number;
+  cost?: number;
   currency?: string;
   carbonPricePerTon: number;
   emissionFactor?: number;
   factorSource?: string | null;
+  emissionFactorId?: string | null;
+  emissionFactorKey?: string | null;
+  emissionFactorValue?: number;
+  emissionFactorUnit?: string | null;
+  emissionFactorSourceName?: string | null;
+  emissionFactorSourceYear?: number | null;
+  emissionFactorType?: "sample" | "official" | "custom" | "missing";
+  calculationFormula?: string | null;
   emissionsKgCo2e?: number;
   emissionsTonnes: number;
-  calculationStatus?: "calculated" | "missing_factor";
+  kgCO2e?: number;
+  tCO2e?: number;
+  carbonIntensityKgCo2ePerTonKm?: number;
+  calculationStatus?: "calculated" | "missing_factor" | "invalid_input" | "estimated";
+  dataQualityWarnings?: string[];
+  calculatedAt?: string | null;
   carbonCostUsd: number;
   status: ShipmentStatus;
   shipmentDate: string;
+  reportingPeriod?: string | null;
   distanceSource?: "MANUAL" | "ESTIMATED";
   notes?: string | null;
   metadata?: {
@@ -332,6 +363,11 @@ export interface Shipment {
     [key: string]: unknown;
   };
   createdAt: string;
+  updatedAt?: string;
+  archivedAt?: string | null;
+  archivedBy?: string | null;
+  createdBy?: string | null;
+  updatedBy?: string | null;
   supplier?: Supplier;
 }
 
@@ -936,19 +972,31 @@ export interface UploadResult {
 
 export interface ShipmentImportRowPayload {
   rowIndex: number;
+  reference?: string;
+  shipmentReference?: string;
+  bolNumber?: string;
+  containerId?: string;
   origin?: string;
+  originCountry?: string;
+  originRegion?: string;
   destination: string;
+  destinationCountry?: string;
+  destinationRegion?: string;
   weightKg: number | "";
   distanceKm?: number | "";
   transportMode?: TransportMode;
+  carrierId?: string;
   fuelType?: string;
-  reference?: string;
   supplierId?: string;
+  linkedSupplierId?: string;
   supplierName?: string;
   carrier?: string;
   costUsd?: number | "";
+  cost?: number | "";
+  currency?: string;
   status?: ShipmentStatus;
   shipmentDate?: string;
+  reportingPeriod?: string;
   vehicleType?: string;
   notes?: string;
   rawData?: Record<string, string>;

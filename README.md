@@ -27,6 +27,32 @@ npm run dev
 
 The frontend expects `VITE_API_URL` to include the `/api` prefix, for example `http://localhost:5000/api` locally or `https://carbonflow-h9cj.onrender.com/api` in production. `VITE_API_BASE_URL` remains supported for older local setups.
 
+## Test Commands
+
+Backend:
+
+```bash
+cd backend
+npm test
+npm run test:jest
+npm run test:shipment
+npm run test:ci
+```
+
+- `npm test` runs the existing Node-based AI smoke tests.
+- `npm run test:jest` runs the backend Jest suite.
+- `npm run test:shipment` targets the shipment and governed import workflow regression tests.
+- `npm run test:ci` runs the combined backend CI-style test command.
+
+Frontend:
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+```
+
 ## Environment Variables
 
 Backend values are documented in `backend/.env.example`. Add those variables in the Render dashboard for the backend service. At minimum, production needs `MONGO_URI`, strong JWT secrets, `FRONTEND_URL`, `ADMIN_URL`, `BACKEND_URL`, `CORS_ORIGINS`, and SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`) so signup verification emails can be delivered.

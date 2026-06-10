@@ -53,7 +53,7 @@ function buildMonthWindow(count = 6) {
     const nextDate = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() - index, 1));
     months.push({
       key: `${nextDate.getUTCFullYear()}-${String(nextDate.getUTCMonth() + 1).padStart(2, "0")}`,
-      name: nextDate.toLocaleString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" }),
+      name: nextDate.toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }),
       scope1: 0,
       scope2: 0,
       scope3: 0,
@@ -65,6 +65,12 @@ function buildMonthWindow(count = 6) {
   }
 
   return months;
+}
+
+function reportingMonthKey(record = {}) {
+  const sourceDate = record.reportingPeriodStart || record.occurredAt || record.activityDate;
+  const date = new Date(sourceDate || Date.now());
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 class LedgerService extends BaseService {
@@ -200,6 +206,20 @@ class LedgerService extends BaseService {
     if (query.factorStatus === "missing") recordFilter.$or = [{ factorValue: null }, { factorValue: 0 }, { factorUnit: null }, { calculationStatus: "missing_factor" }, { calculationStatus: "draft_incomplete" }];
     if (query.factorStatus === "sample") recordFilter.factorIsSample = true;
     if (query.factorStatus === "custom") recordFilter.factorIsSample = false;
+    if (query.qualityFilter === "zero_activity") recordFilter.activityAmount = 0;
+    if (query.qualityFilter === "missing_period") {
+      recordFilter.reportingPeriod = { $in: [null, ""] };
+      recordFilter.reportingPeriodStart = null;
+    }
+    if (query.qualityFilter === "missing_facility") {
+      recordFilter.facilityName = { $in: [null, ""] };
+      recordFilter.facilityId = { $in: [null, ""] };
+    }
+    if (query.qualityFilter === "calculation_error") recordFilter.calculationStatus = "calculation_error";
+    if (query.qualityFilter === "unlinked_supplier") {
+      recordFilter.supplierId = { $in: [null, ""] };
+      recordFilter["activityData.supplierName"] = { $exists: true, $ne: "" };
+    }
     if (query.activityDateFrom || query.activityDateTo) {
       recordFilter.occurredAt = {};
       if (query.activityDateFrom) recordFilter.occurredAt.$gte = new Date(query.activityDateFrom);
@@ -278,7 +298,7 @@ class LedgerService extends BaseService {
         supplierBreakdownMap.set(supplierKey, currentSupplier);
       }
 
-      const key = `${record.periodYear}-${String(record.periodMonth).padStart(2, "0")}`;
+      const key = reportingMonthKey(record);
       const month = monthMap.get(key);
       if (month) {
         if (record.scope === 1) month.scope1 = round(month.scope1 + amountTonnes);
@@ -288,7 +308,7 @@ class LedgerService extends BaseService {
     });
 
     emissionSummary.forEach((record) => {
-      const key = `${record.periodYear}-${String(record.periodMonth).padStart(2, "0")}`;
+      const key = reportingMonthKey(record);
       const month = monthMap.get(key);
       if (month && record.dataStatus !== "approved") {
         if (record.scope === 1) month.draftScope1 = round(month.draftScope1 + Number(record.amountTonnes || 0));

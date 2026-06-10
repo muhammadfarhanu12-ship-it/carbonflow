@@ -23,8 +23,8 @@ function normalizeTransportMode(value) {
 
 function normalizeStatus(value) {
   const normalized = String(value || "").trim().toUpperCase();
-  if (["PLANNED", "IN_TRANSIT", "DELAYED", "DELIVERED"].includes(normalized)) return normalized;
-  return "IN_TRANSIT";
+  if (["DRAFT", "SUBMITTED", "PLANNED", "IN_TRANSIT", "DELAYED", "DELIVERED", "CANCELLED", "ARCHIVED"].includes(normalized)) return normalized;
+  return "DRAFT";
 }
 
 function toNumber(value) {

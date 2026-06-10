@@ -2,12 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Bell, ChevronDown, FileText, Loader2, LogOut, Plus, Search, Settings, Upload, User } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/src/components/ui/button";
-import { AddShipmentModal } from "@/src/components/shared/AddShipmentModal";
-import { UploadDataModal } from "@/src/components/shared/UploadDataModal";
 import { dashboardService } from "@/src/services/dashboardService";
 import { reportsService } from "@/src/services/reportsService";
 import { useToast } from "@/src/components/providers/ToastProvider";
 import { useAuth } from "@/src/hooks/useAuth";
+import { hasPermission } from "@/src/utils/permissions";
 
 type NotificationItem = {
   id: string;
@@ -20,12 +19,12 @@ export function Header() {
   const { showToast } = useToast();
   const { user } = useAuth();
   const [search, setSearch] = useState("");
-  const [showAddShipment, setShowAddShipment] = useState(false);
-  const [showUpload, setShowUpload] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [loadingNotifications, setLoadingNotifications] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const canCreateShipment = hasPermission(user, "shipment:create");
+  const canImportShipment = hasPermission(user, "shipment:import") || hasPermission(user, "import:create");
 
   useEffect(() => {
     const loadNotifications = async () => {
@@ -113,14 +112,18 @@ export function Header() {
         </div>
         <div className="flex items-center space-x-4">
           <div className="hidden md:flex items-center space-x-2 mr-4">
-            <Button variant="outline" size="sm" className="h-8" onClick={() => setShowAddShipment(true)}>
-              <Plus className="mr-2 h-3 w-3" />
-              Add Shipment
-            </Button>
-            <Button variant="outline" size="sm" className="h-8" onClick={() => setShowUpload(true)}>
-              <Upload className="mr-2 h-3 w-3" />
-              Upload Data
-            </Button>
+            {canCreateShipment ? (
+              <Button variant="outline" size="sm" className="h-8" onClick={() => navigate("/app/shipments?compose=1")}>
+                <Plus className="mr-2 h-3 w-3" />
+                Add Shipment
+              </Button>
+            ) : null}
+            {canImportShipment ? (
+              <Button variant="outline" size="sm" className="h-8" onClick={() => navigate("/app/imports?type=shipment")}>
+                <Upload className="mr-2 h-3 w-3" />
+                Upload Data
+              </Button>
+            ) : null}
             <Button variant="outline" size="sm" className="h-8" onClick={() => navigate("/app/reports")}>
               <FileText className="mr-2 h-3 w-3" />
               Report
@@ -204,9 +207,6 @@ export function Header() {
           </div>
         ) : null}
       </header>
-
-      <AddShipmentModal open={showAddShipment} onClose={() => setShowAddShipment(false)} onCreated={() => navigate("/app/shipments")} />
-      <UploadDataModal open={showUpload} onClose={() => setShowUpload(false)} onUploaded={() => navigate("/app/shipments")} />
     </>
   );
 }

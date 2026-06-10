@@ -36,14 +36,14 @@ function normalizeStatus(value) {
   const normalizedValue = sanitizeString(value).toUpperCase();
 
   if (!normalizedValue) {
-    return "IN_TRANSIT";
+    return "DRAFT";
   }
 
-  if (["PLANNED", "IN_TRANSIT", "DELAYED", "DELIVERED"].includes(normalizedValue)) {
+  if (["DRAFT", "SUBMITTED", "PLANNED", "IN_TRANSIT", "DELAYED", "DELIVERED", "CANCELLED", "ARCHIVED"].includes(normalizedValue)) {
     return normalizedValue;
   }
 
-  return "IN_TRANSIT";
+  return "DRAFT";
 }
 
 function toNumber(value, fallbackValue = 0) {
@@ -97,19 +97,31 @@ function validateImportPayload(payload) {
 function sanitizeIncomingRow(row = {}) {
   return {
     rowIndex: Number(row.rowIndex),
+    reference: sanitizeString(row.reference || row.shipmentReference),
+    shipmentReference: sanitizeString(row.shipmentReference || row.reference),
+    bolNumber: sanitizeString(row.bolNumber),
+    containerId: sanitizeString(row.containerId),
     origin: sanitizeString(row.origin) || DEFAULT_ORIGIN,
+    originCountry: sanitizeString(row.originCountry),
+    originRegion: sanitizeString(row.originRegion),
     destination: sanitizeString(row.destination),
+    destinationCountry: sanitizeString(row.destinationCountry),
+    destinationRegion: sanitizeString(row.destinationRegion),
     weightKg: toNumber(row.weightKg, row.weightKg),
     distanceKm: toNumber(row.distanceKm, 0),
     transportMode: normalizeTransportMode(row.transportMode),
+    carrierId: sanitizeString(row.carrierId),
     fuelType: sanitizeString(row.fuelType),
-    reference: sanitizeString(row.reference),
-    supplierId: sanitizeString(row.supplierId),
+    supplierId: sanitizeString(row.linkedSupplierId || row.supplierId),
+    linkedSupplierId: sanitizeString(row.linkedSupplierId || row.supplierId),
     supplierName: sanitizeString(row.supplierName) || DEFAULT_SUPPLIER_NAME,
     carrier: sanitizeString(row.carrier) || DEFAULT_CARRIER,
-    costUsd: toNumber(row.costUsd, 0),
+    costUsd: toNumber(row.costUsd ?? row.cost, 0),
+    cost: toNumber(row.cost ?? row.costUsd, 0),
+    currency: sanitizeString(row.currency).toUpperCase() || "USD",
     status: normalizeStatus(row.status),
     shipmentDate: sanitizeString(row.shipmentDate),
+    reportingPeriod: sanitizeString(row.reportingPeriod),
     vehicleType: sanitizeString(row.vehicleType),
     notes: sanitizeString(row.notes),
     rawData: row.rawData && typeof row.rawData === "object" ? row.rawData : {},
@@ -196,10 +208,7 @@ async function buildSupplierResolver(companyId, rows) {
         if (supplierById) {
           return supplierById;
         }
-
-        if (!row.supplierName) {
-          throw new Error(`Supplier not found for supplierId ${row.supplierId}`);
-        }
+        throw new Error(`Supplier not found for supplierId ${row.supplierId}`);
       }
 
       const normalizedSupplierName = normalizeKey(row.supplierName);
@@ -237,59 +246,12 @@ async function buildSupplierResolver(companyId, rows) {
 }
 
 function buildShipmentReference(row, metadata) {
-  if (row.reference) {
-    return row.reference;
+  if (row.shipmentReference || row.reference) {
+    return row.shipmentReference || row.reference;
   }
 
   const uploadToken = sanitizeString(metadata.uploadId) || randomUUID().slice(0, 8);
   return `IMP-${uploadToken}-${String(row.rowIndex).padStart(6, "0")}`;
-}
-
-function buildShipmentDocument(row, supplier, companyId, settings, metadata) {
-  const now = new Date();
-  const shipmentDate = row.shipmentDate ? new Date(row.shipmentDate) : now;
-  const reference = buildShipmentReference(row, metadata);
-  const baseDocument = {
-    companyId,
-    supplierId: supplier.id,
-    reference,
-    origin: row.origin || DEFAULT_ORIGIN,
-    destination: row.destination,
-    distanceKm: Number(row.distanceKm || 0),
-    distanceUnit: "km",
-    transportMode: row.transportMode,
-    carrier: row.carrier || DEFAULT_CARRIER,
-    vehicleType: row.vehicleType || null,
-    fuelType: row.fuelType || null,
-    weightKg: Number(row.weightKg),
-    weightUnit: "kg",
-    costUsd: Number(row.costUsd || 0),
-    currency: "USD",
-    carbonPricePerTon: Number(settings.carbonPricePerTon || 0),
-    status: row.status || "IN_TRANSIT",
-    shipmentDate,
-    distanceSource: Number(row.distanceKm || 0) > 0 ? "MANUAL" : "ESTIMATED",
-    notes: row.notes || null,
-    metadata: {
-      importSource: metadata.source,
-      importFileName: metadata.fileName || null,
-      importUploadId: metadata.uploadId || null,
-      importBatchIndex: metadata.batchIndex,
-      importRowIndex: row.rowIndex,
-      importTemplateName: metadata.templateName || null,
-    },
-  };
-  const calculatedFields = ShipmentService.calculateFields(baseDocument, settings.emissionFactorOverrides || {});
-
-  return {
-    ...baseDocument,
-    emissionsTonnes: calculatedFields.emissionsTonnes,
-    emissionsKgCo2e: calculatedFields.emissionsKgCo2e,
-    emissionFactor: calculatedFields.emissionFactor,
-    factorSource: calculatedFields.factorSource,
-    calculationStatus: calculatedFields.calculationStatus,
-    carbonCostUsd: calculatedFields.carbonCostUsd,
-  };
 }
 
 async function buildPersistableRows(rows, companyId, settings, metadata) {
@@ -300,11 +262,25 @@ async function buildPersistableRows(rows, companyId, settings, metadata) {
   for (const row of rows) {
     try {
       const supplier = await supplierResolver.resolve(row);
-      const shipmentDocument = buildShipmentDocument(row, supplier, companyId, settings, metadata);
       persistableRows.push({
         rowIndex: row.rowIndex,
-        reference: shipmentDocument.reference,
-        document: shipmentDocument,
+        reference: buildShipmentReference(row, metadata),
+        payload: {
+          ...row,
+          reference: buildShipmentReference(row, metadata),
+          shipmentReference: buildShipmentReference(row, metadata),
+          linkedSupplierId: supplier.id,
+          supplierId: supplier.id,
+          supplierName: supplier.name,
+          metadata: {
+            importSource: metadata.source,
+            importFileName: metadata.fileName || null,
+            importUploadId: metadata.uploadId || null,
+            importBatchIndex: metadata.batchIndex,
+            importRowIndex: row.rowIndex,
+            importTemplateName: metadata.templateName || null,
+          },
+        },
       });
     } catch (error) {
       errors.push(buildValidationError(
@@ -321,78 +297,8 @@ async function buildPersistableRows(rows, companyId, settings, metadata) {
   };
 }
 
-async function executeBulkUpserts(companyId, rows) {
-  const errors = [];
-  let successful = 0;
-  let inserted = 0;
-  let updated = 0;
-
-  for (let startIndex = 0; startIndex < rows.length; startIndex += IMPORT_BATCH_SIZE) {
-    const chunk = rows.slice(startIndex, startIndex + IMPORT_BATCH_SIZE);
-    const references = chunk.map((item) => item.reference);
-    const existingShipments = await Shipment.find({
-      companyId,
-      reference: { $in: references },
-    }).select("reference");
-    const existingReferences = new Set(existingShipments.map((shipment) => shipment.reference));
-    const now = new Date();
-    const operations = chunk.map((item) => ({
-      updateOne: {
-        filter: {
-          companyId,
-          reference: item.reference,
-        },
-        update: {
-          $set: {
-            ...item.document,
-            updatedAt: now,
-          },
-          $setOnInsert: {
-            _id: randomUUID(),
-            createdAt: now,
-          },
-        },
-        upsert: true,
-      },
-    }));
-
-    let writeErrors = [];
-
-    try {
-      await Shipment.bulkWrite(operations, { ordered: false });
-    } catch (error) {
-      writeErrors = Array.isArray(error.writeErrors) ? error.writeErrors : [];
-      writeErrors.forEach((writeError) => {
-        const chunkRow = chunk[Number(writeError.index)];
-        errors.push(buildValidationError(
-          chunkRow?.rowIndex || -1,
-          "row",
-          sanitizeBulkErrorMessage(writeError.errmsg || writeError.message || "Bulk write failed"),
-          chunkRow?.reference,
-        ));
-      });
-
-      if (writeErrors.length === 0) {
-        throw error;
-      }
-    }
-
-    const failedIndexes = new Set(writeErrors.map((writeError) => Number(writeError.index)));
-    successful += chunk.length - failedIndexes.size;
-    inserted += chunk.filter((row, index) => !failedIndexes.has(index) && !existingReferences.has(row.reference)).length;
-    updated += chunk.filter((row, index) => !failedIndexes.has(index) && existingReferences.has(row.reference)).length;
-  }
-
-  return {
-    successful,
-    inserted,
-    updated,
-    errors,
-  };
-}
-
 class ImportService {
-  static async importShipments(payload, companyId) {
+  static async importShipments(payload, companyId, actor = null) {
     const { shipments, metadata } = validateImportPayload(payload);
     const settings = await SettingsService.getByCompanyId(companyId);
     const validationErrors = [];
@@ -425,11 +331,17 @@ class ImportService {
       settings,
       metadata,
     );
-    const bulkResult = await executeBulkUpserts(companyId, persistableRows);
-    const allErrors = [...validationErrors, ...supplierErrors, ...bulkResult.errors]
+    const importResult = await ShipmentService.importRows(
+      persistableRows.map((row) => row.payload),
+      companyId,
+      Number(settings.carbonPricePerTon || 0),
+      actor,
+      metadata,
+    );
+    const allErrors = [...validationErrors, ...supplierErrors, ...(importResult.errors || [])]
       .sort((leftError, rightError) => leftError.rowIndex - rightError.rowIndex);
     const totalRows = shipments.length;
-    const successful = bulkResult.successful;
+    const successful = Number(importResult.summary?.successful || 0);
     const failed = new Set(allErrors.map((error) => error.rowIndex)).size;
 
     return {
@@ -438,10 +350,11 @@ class ImportService {
         successful,
         ["\u0938\u092B\u0932"]: successful,
         failed,
-        inserted: bulkResult.inserted,
-        updated: bulkResult.updated,
+        inserted: Number(importResult.summary?.inserted || 0),
+        updated: Number(importResult.summary?.updated || 0),
       },
       errors: allErrors,
+      createdRecords: importResult.createdRecords || [],
       metadata: {
         ...metadata,
         processedRows: totalRows,

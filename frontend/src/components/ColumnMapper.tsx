@@ -215,10 +215,14 @@ export function ColumnMapper({
               value={defaults.status}
               onChange={(event) => onDefaultsChange("status", event.target.value as ImportDefaults["status"])}
             >
+              <option value="DRAFT">DRAFT</option>
+              <option value="SUBMITTED">SUBMITTED</option>
               <option value="PLANNED">PLANNED</option>
               <option value="IN_TRANSIT">IN_TRANSIT</option>
               <option value="DELAYED">DELAYED</option>
               <option value="DELIVERED">DELIVERED</option>
+              <option value="CANCELLED">CANCELLED</option>
+              <option value="ARCHIVED">ARCHIVED</option>
             </select>
             <select
               className="rounded-md border border-input bg-background px-3 py-2 text-sm"

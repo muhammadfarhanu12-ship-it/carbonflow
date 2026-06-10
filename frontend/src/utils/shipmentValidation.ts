@@ -2,16 +2,14 @@ import type { ShipmentPayload } from "@/src/services/shipmentService";
 
 export type ShipmentFieldErrors = Partial<Record<keyof ShipmentPayload, string>>;
 
-const FUEL_REQUIRED_MODES = new Set(["ROAD", "AIR", "OCEAN", "RAIL"]);
-
 export function validateShipmentPayload(payload: ShipmentPayload): ShipmentFieldErrors {
   const errors: ShipmentFieldErrors = {};
-  const reference = payload.reference.trim();
+  const reference = (payload.shipmentReference || payload.reference || "").trim();
   const carrier = payload.carrier.trim();
   const origin = payload.origin.trim();
   const destination = payload.destination.trim();
   const shipmentDate = String(payload.shipmentDate || "").trim();
-  const fuelType = String(payload.fuelType || "").trim();
+  const currency = String(payload.currency || "USD").trim().toUpperCase();
 
   if (!reference) errors.reference = "Shipment reference is required.";
   if (!carrier) errors.carrier = "Carrier is required.";
@@ -22,9 +20,7 @@ export function validateShipmentPayload(payload: ShipmentPayload): ShipmentField
   if (!Number.isFinite(payload.distanceKm) || payload.distanceKm <= 0) errors.distanceKm = "Distance must be greater than 0 km.";
   if (!Number.isFinite(payload.weightKg) || payload.weightKg <= 0) errors.weightKg = "Weight must be greater than 0 kg.";
   if (!Number.isFinite(payload.costUsd) || payload.costUsd < 0) errors.costUsd = "Shipment cost cannot be negative.";
-  if (payload.transportMode && FUEL_REQUIRED_MODES.has(payload.transportMode) && !fuelType) {
-    errors.fuelType = "Fuel type is required for this transport mode.";
-  }
+  if (!/^[A-Z]{3}$/.test(currency)) errors.currency = "Currency must be a valid 3-letter code.";
 
   return errors;
 }

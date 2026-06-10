@@ -14,9 +14,13 @@ const mocks = vi.hoisted(() => ({
   syncIntegration: vi.fn(),
   socketOn: vi.fn(),
   getSession: vi.fn(),
-  listUsers: vi.fn(),
-  createUser: vi.fn(),
-  updateUser: vi.fn(),
+  listTeam: vi.fn(),
+  listPendingInvites: vi.fn(),
+  inviteUser: vi.fn(),
+  updateUserRole: vi.fn(),
+  updateUserStatus: vi.fn(),
+  resendInvite: vi.fn(),
+  cancelInvite: vi.fn(),
 }));
 
 vi.mock("@/src/services/settingsService", () => ({
@@ -41,9 +45,13 @@ vi.mock("@/src/services/authService", () => ({
 
 vi.mock("@/src/services/userService", () => ({
   userService: {
-    listUsers: mocks.listUsers,
-    createUser: mocks.createUser,
-    updateUser: mocks.updateUser,
+    listTeam: mocks.listTeam,
+    listPendingInvites: mocks.listPendingInvites,
+    inviteUser: mocks.inviteUser,
+    updateUserRole: mocks.updateUserRole,
+    updateUserStatus: mocks.updateUserStatus,
+    resendInvite: mocks.resendInvite,
+    cancelInvite: mocks.cancelInvite,
   },
 }));
 
@@ -113,7 +121,8 @@ describe("SettingsPage", () => {
     mocks.updateSettings.mockResolvedValue(settings);
     mocks.createApiKey.mockResolvedValue({ ...settings, oneTimeApiKey: "generated-key-value", oneTimeApiKeyId: "key-2" });
     mocks.revokeApiKey.mockResolvedValue({ ...settings, apiKeys: [{ ...settings.apiKeys[0], status: "revoked" }] });
-    mocks.listUsers.mockResolvedValue({ data: [], pagination: { page: 1, pageSize: 25, total: 0, totalPages: 1 } });
+    mocks.listTeam.mockResolvedValue([]);
+    mocks.listPendingInvites.mockResolvedValue([]);
     Object.assign(navigator, { clipboard: { writeText: vi.fn() } });
   });
 
@@ -148,7 +157,7 @@ describe("SettingsPage", () => {
     await screen.findByText("Profile settings");
     await userEvent.click(screen.getByRole("button", { name: /team/i }));
 
-    expect(await screen.findByText(/does not have permission to manage workspace users/i)).toBeInTheDocument();
+    expect(await screen.findByText(/ask an owner or admin for access/i)).toBeInTheDocument();
   });
 
   test("integration not configured state is honest", async () => {

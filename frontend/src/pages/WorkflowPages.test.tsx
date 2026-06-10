@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { EmissionFactorsPage } from "./EmissionFactorsPage";
 import { DataImportsPage } from "./DataImportsPage";
@@ -107,20 +108,20 @@ describe("new user-side workflow pages", () => {
 
   test("Data Imports empty state renders", async () => {
     mocks.useAuth.mockReturnValue({ user: { role: "DATA_ENTRY" } });
-    render(<DataImportsPage />);
+    render(<MemoryRouter><DataImportsPage /></MemoryRouter>);
     expect(await screen.findByText(/No imports recorded yet/i)).toBeInTheDocument();
   });
 
   test("Data Imports read-only user sees history but upload disabled", async () => {
     mocks.useAuth.mockReturnValue({ user: { role: "VIEWER" } });
-    render(<DataImportsPage />);
+    render(<MemoryRouter><DataImportsPage /></MemoryRouter>);
     expect(await screen.findByText(/You can view import history/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Preview Import/i })).not.toBeInTheDocument();
   });
 
   test("Data Imports no import:view user sees permission denied", () => {
     mocks.useAuth.mockReturnValue({ user: { role: "NO_ACCESS", permissions: [] } });
-    render(<DataImportsPage />);
+    render(<MemoryRouter><DataImportsPage /></MemoryRouter>);
     expect(screen.getByText("You do not have permission to view imports.")).toBeInTheDocument();
   });
 
@@ -130,7 +131,7 @@ describe("new user-side workflow pages", () => {
       pagination: { page: 1, pageSize: 50, total: 1, totalPages: 1 },
     });
     mocks.useAuth.mockReturnValue({ user: { role: "DATA_ENTRY" } });
-    render(<DataImportsPage />);
+    render(<MemoryRouter><DataImportsPage /></MemoryRouter>);
     expect(await screen.findByText("ledger.csv")).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText(/Paste CSV data/i), { target: { value: "scope,category\n1,Stationary combustion" } });
     fireEvent.click(screen.getByRole("button", { name: /Preview Import/i }));

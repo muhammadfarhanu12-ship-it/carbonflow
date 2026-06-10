@@ -1,5 +1,7 @@
+// frontend/src/pages/LedgerPage.test.tsx
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { LedgerPage } from "./LedgerPage";
 
@@ -138,12 +140,13 @@ function buildRecord(overrides = {}) {
 }
 
 async function renderLedger() {
-  render(<LedgerPage />);
+  render(<MemoryRouter initialEntries={["/app/ledger"]}><LedgerPage /></MemoryRouter>);
   await screen.findByText("Carbon Ledger");
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.localStorage.clear();
   Element.prototype.scrollIntoView = vi.fn();
   URL.createObjectURL = vi.fn(() => "blob:report");
   URL.revokeObjectURL = vi.fn();
@@ -198,14 +201,19 @@ describe("LedgerPage", () => {
     expect(screen.getByLabelText("Activity Amount")).toBeInTheDocument();
   });
 
-  test("validates submitted activity amount and shows calculation preview states", async () => {
+  test("suppresses calculation preview on mount, deduplicates warnings, and validates submitted activity amount", async () => {
     await renderLedger();
 
-    await screen.findByText("Calculation preview");
-    expect(screen.getAllByText(/Replace with an official\/custom factor before official reporting/i).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("calculation-preview")).not.toBeInTheDocument();
+    await userEvent.clear(screen.getByLabelText("Activity Amount"));
+    await userEvent.type(screen.getByLabelText("Activity Amount"), "100");
+    await screen.findByTestId("calculation-preview");
+    expect(screen.getAllByText(/Replace with an official\/custom factor before official reporting/i)).toHaveLength(1);
 
+    await userEvent.clear(screen.getByLabelText("Activity Amount"));
+    await userEvent.type(screen.getByLabelText("Activity Amount"), "0");
     await userEvent.click(screen.getByRole("button", { name: /submit for review/i }));
-    expect(await screen.findByText("Activity amount must be greater than 0 before submitting.")).toBeInTheDocument();
+    expect(await screen.findByText("Activity amount must be greater than 0 before saving.")).toBeInTheDocument();
 
     mocks.matchFactor.mockImplementation((query = "") => (
       String(query).includes("UNKNOWN")
@@ -219,9 +227,11 @@ describe("LedgerPage", () => {
           isSample: true,
         })
     ));
+    await userEvent.clear(screen.getByLabelText("Activity Amount"));
+    await userEvent.type(screen.getByLabelText("Activity Amount"), "100");
     await userEvent.clear(screen.getByLabelText("Factor Key / Fuel"));
     await userEvent.type(screen.getByLabelText("Factor Key / Fuel"), "UNKNOWN");
-    expect(await screen.findByText(/Missing factor warning/i)).toBeInTheDocument();
+    expect(await screen.findByText(/No matching factor was found/i)).toBeInTheDocument();
   }, 10000);
 
   test("Carbon Ledger preview uses official/custom factor without sample warning", async () => {
@@ -237,6 +247,8 @@ describe("LedgerPage", () => {
 
     await renderLedger();
 
+    await userEvent.clear(screen.getByLabelText("Activity Amount"));
+    await userEvent.type(screen.getByLabelText("Activity Amount"), "100");
     await screen.findByText(/Using custom emission factor/i);
     expect(screen.getAllByText(/Custom verified source 2025/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Using custom emission factor/i)).toBeInTheDocument();
@@ -327,6 +339,7 @@ describe("LedgerPage", () => {
   test("CSV import preview shows valid and invalid row counts", async () => {
     await renderLedger();
 
+    expect(screen.getByRole("button", { name: /save valid rows/i })).toBeDisabled();
     await userEvent.type(screen.getByPlaceholderText(/scope,category/i), "scope,category\n1,Stationary combustion");
     await userEvent.click(screen.getByRole("button", { name: /preview csv/i }));
 
@@ -334,6 +347,29 @@ describe("LedgerPage", () => {
     expect(screen.getAllByText("Valid").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Invalid").length).toBeGreaterThan(0);
     expect(screen.getByText("activityAmount must be greater than 0")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /save 1 valid rows/i })).toBeEnabled();
+    await userEvent.clear(screen.getByPlaceholderText(/scope,category/i));
+    expect(screen.getByRole("button", { name: /save valid rows/i })).toBeDisabled();
+  }, 10000);
+
+  test("defaults records to all statuses and uses quality links with active filter chip", async () => {
+    await renderLedger();
+
+    expect(screen.getByDisplayValue("All Records")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /missing factors/i }));
+    expect(await screen.findByText("Filtered: Missing factors")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mocks.getEntries).toHaveBeenLastCalledWith(expect.stringContaining("qualityFilter=missing_factor"));
+      expect(mocks.getEntries).toHaveBeenLastCalledWith(expect.stringContaining("factorStatus=missing"));
+    });
+  });
+
+  test("renders zero activity amount tooltip and sentence-case labels", async () => {
+    await renderLedger();
+
+    expect(screen.getByText("Zero activity amount")).toBeInTheDocument();
+    expect(screen.getByLabelText(/These records have an activity amount of 0/i)).toBeInTheDocument();
+    expect(screen.queryByText("Submit Drafts")).not.toBeInTheDocument();
   });
 
   test("does not crash on empty API responses and empty suppliers", async () => {

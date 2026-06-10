@@ -36,7 +36,6 @@ describe("validateShipmentPayload", () => {
       distanceKm: 0,
       weightKg: 0,
       costUsd: -1,
-      fuelType: "",
     });
 
     expect(errors.reference).toBeTruthy();
@@ -47,6 +46,5 @@ describe("validateShipmentPayload", () => {
     expect(errors.distanceKm).toBeTruthy();
     expect(errors.weightKg).toBeTruthy();
     expect(errors.costUsd).toBeTruthy();
-    expect(errors.fuelType).toBeTruthy();
   });
 });
