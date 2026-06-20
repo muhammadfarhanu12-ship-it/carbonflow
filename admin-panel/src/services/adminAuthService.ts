@@ -1,5 +1,18 @@
-import { apiClient } from './apiClient';
+﻿import { apiClient } from './apiClient';
 import type { AuthResponse, LoginData, AdminSessionUser } from '../types/admin';
+
+function isAdminSessionUser(value: unknown): value is AdminSessionUser {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.id === 'string'
+    && typeof candidate.email === 'string'
+    && typeof candidate.adminRole === 'string'
+    && Array.isArray(candidate.adminPermissions)
+    && typeof candidate.adminStatus === 'string';
+}
 
 class AdminAuthService {
   async login(data: LoginData): Promise<AuthResponse> {
@@ -21,22 +34,33 @@ class AdminAuthService {
     localStorage.removeItem('adminUser');
   }
 
+  setStoredUser(user: AdminSessionUser) {
+    localStorage.setItem('adminUser', JSON.stringify(user));
+  }
+
   setSession(response: AuthResponse) {
     localStorage.setItem('adminToken', response.token);
-    localStorage.setItem('adminUser', JSON.stringify(response.admin));
+    this.setStoredUser(response.admin);
   }
 
   getSession() {
     const token = localStorage.getItem('adminToken');
     const userStr = localStorage.getItem('adminUser');
     let user: AdminSessionUser | null = null;
+
     if (userStr) {
       try {
-        user = JSON.parse(userStr);
+        const parsed = JSON.parse(userStr);
+        if (isAdminSessionUser(parsed)) {
+          user = parsed;
+        } else {
+          this.logout();
+        }
       } catch (_error) {
-        // ignore
+        this.logout();
       }
     }
+
     return { token, user };
   }
 }

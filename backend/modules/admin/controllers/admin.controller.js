@@ -1,4 +1,4 @@
-const AdminService = require("../services/admin.service");
+﻿const AdminService = require("../services/admin.service");
 const MarketplaceService = require("../../../services/marketplace.service");
 const { sendSuccess } = require("../../../utils/apiResponse");
 
@@ -11,7 +11,7 @@ function buildMarketplaceAdminActor(admin) {
     id: admin?.id || admin?._id || null,
     name: admin?.name || admin?.email || "Admin",
     email: admin?.email || null,
-    role: String(admin?.role || "admin").toUpperCase(),
+    role: String(admin?.adminRole || admin?.role || "ADMIN").toUpperCase(),
   };
 }
 
@@ -266,3 +266,4 @@ exports.refundMarketplacePayment = async (req, res) => {
     }),
   });
 };
+

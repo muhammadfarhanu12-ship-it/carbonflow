@@ -1,4 +1,4 @@
-const AdminAuthService = require("../services/adminAuth.service");
+﻿const AdminAuthService = require("../services/adminAuth.service");
 const { sendSuccess } = require("../../../utils/apiResponse");
 
 exports.login = async (req, res) => sendSuccess(res, {
@@ -14,10 +14,11 @@ exports.register = async (req, res) => sendSuccess(res, {
 
 exports.me = async (req, res) => sendSuccess(res, {
   message: "Admin profile fetched successfully",
-  data: await AdminAuthService.getAdminProfile(req.admin.id),
+  data: await AdminAuthService.getAdminProfile(req.admin.id || req.admin._id),
 });
 
 exports.changePassword = async (req, res) => sendSuccess(res, {
   message: "Admin password updated successfully",
-  data: await AdminAuthService.changePassword(req.admin.id, req.body),
+  data: await AdminAuthService.changePassword(req.admin.id || req.admin._id, req.body),
 });
+

@@ -1,26 +1,20 @@
-const bcrypt = require("bcryptjs");
+﻿const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const { Admin, AuditLog } = require("../../../models");
+const { User, AuditLog } = require("../../../models");
 const env = require("../../../config/env");
 const ApiError = require("../../../utils/ApiError");
-
-function toSafeAdmin(admin) {
-  return {
-    id: admin.id,
-    name: admin.name,
-    email: admin.email,
-    role: admin.role,
-    status: admin.status,
-    lastLoginAt: admin.lastLoginAt,
-    createdAt: admin.createdAt,
-    updatedAt: admin.updatedAt,
-  };
-}
+const {
+  getAdminPermissionsForRole,
+  isPlatformAdmin,
+  normalizeAdminRole,
+  normalizeAdminStatus,
+  toAdminSessionUser,
+} = require("../adminAccess");
 
 function signAdminToken(admin) {
   return jwt.sign(
     {
-      role: admin.role,
+      role: normalizeAdminRole(admin.adminRole),
       type: "admin",
     },
     env.admin.jwtSecret,
@@ -49,102 +43,83 @@ async function writeAuditLog(action, admin, details = {}) {
 
 class AdminAuthService {
   static async login(payload) {
-    const admin = await Admin.findOne({ email: String(payload.email).toLowerCase() }).select("+passwordHash");
+    const email = String(payload.email || "").trim().toLowerCase();
+    const user = await User.scope("withPassword").findOne({ email });
 
-    if (!admin) {
+    if (!user) {
       throw new ApiError(401, "Invalid admin credentials");
     }
 
-    const isPasswordValid = await bcrypt.compare(payload.password, admin.passwordHash);
+    if (user.status === "SUSPENDED") {
+      throw new ApiError(403, "Your account has been suspended");
+    }
+
+    const isPasswordValid = await bcrypt.compare(payload.password, user.password);
     if (!isPasswordValid) {
       throw new ApiError(401, "Invalid admin credentials");
     }
 
-    if (admin.status !== "active") {
+    if (!isPlatformAdmin(user)) {
+      throw new ApiError(403, "This account does not have admin panel access.");
+    }
+
+    if (normalizeAdminStatus(user.adminStatus) !== "active") {
       throw new ApiError(403, "Admin account is disabled");
     }
 
-    admin.lastLoginAt = new Date();
-    await admin.save();
+    if (user.isVerified === false) {
+      throw new ApiError(403, "Please verify your email before logging in to the admin panel");
+    }
 
-    await writeAuditLog("ADMIN_LOGIN", admin, {
-      description: `${admin.email} signed into the admin portal`,
+    const loginAt = new Date();
+    user.lastLoginAt = loginAt;
+    user.adminLastLoginAt = loginAt;
+    user.adminPermissions = getAdminPermissionsForRole(user.adminRole);
+    await user.save();
+
+    await writeAuditLog("ADMIN_LOGIN", user, {
+      description: `${user.email} signed into the admin portal`,
     });
 
     return {
-      token: signAdminToken(admin),
-      admin: toSafeAdmin(admin),
+      token: signAdminToken(user),
+      admin: toAdminSessionUser(user),
     };
   }
 
-  static async register(payload, actor = null) {
-    const existingAdmins = await Admin.countDocuments();
-    const isBootstrapRegistration = existingAdmins === 0;
-
-    if (!isBootstrapRegistration) {
-      if (!actor) {
-        throw new ApiError(403, "Admin registration is restricted");
-      }
-
-      if (actor.role !== "superadmin") {
-        throw new ApiError(403, "Only superadmins can create new admin accounts");
-      }
-    }
-
-    const email = String(payload.email).toLowerCase();
-    const existingAdmin = await Admin.findOne({ email });
-    if (existingAdmin) {
-      throw new ApiError(409, "An admin with that email already exists");
-    }
-
-    const role = isBootstrapRegistration ? "superadmin" : payload.role || "moderator";
-    const passwordHash = await bcrypt.hash(payload.password, env.auth.bcryptSaltRounds);
-
-    const admin = await Admin.create({
-      name: payload.name,
-      email,
-      passwordHash,
-      role,
-      status: "active",
-    });
-
-    await writeAuditLog("ADMIN_REGISTERED", actor || admin, {
-      description: `${admin.email} was added to the admin system`,
-      targetAdminId: admin.id,
-      targetAdminEmail: admin.email,
-    });
-
-    return toSafeAdmin(admin);
-  }
-
   static async getAdminProfile(adminId) {
-    const admin = await Admin.findById(adminId);
-    if (!admin) {
+    const admin = await User.findById(adminId);
+    if (!admin || !isPlatformAdmin(admin)) {
       throw new ApiError(404, "Admin account not found");
     }
 
-    return toSafeAdmin(admin);
+    if (normalizeAdminStatus(admin.adminStatus) !== "active") {
+      throw new ApiError(403, "Admin account is disabled");
+    }
+
+    return toAdminSessionUser(admin);
   }
 
   static async changePassword(adminId, payload) {
-    const admin = await Admin.findById(adminId).select("+passwordHash");
-    if (!admin) {
+    const admin = await User.scope("withPassword").findByPk(adminId);
+    if (!admin || !isPlatformAdmin(admin)) {
       throw new ApiError(404, "Admin account not found");
     }
 
-    const isPasswordValid = await bcrypt.compare(payload.currentPassword, admin.passwordHash);
+    const isPasswordValid = await bcrypt.compare(payload.currentPassword, admin.password);
     if (!isPasswordValid) {
       throw new ApiError(401, "Current password is incorrect");
     }
 
-    admin.passwordHash = await bcrypt.hash(payload.newPassword, env.auth.bcryptSaltRounds);
+    admin.password = payload.newPassword;
+    admin.forcePasswordChange = false;
     await admin.save();
 
     await writeAuditLog("ADMIN_PASSWORD_UPDATED", admin, {
       description: `${admin.email} updated their admin password`,
     });
 
-    return toSafeAdmin(admin);
+    return toAdminSessionUser(admin);
   }
 }
 

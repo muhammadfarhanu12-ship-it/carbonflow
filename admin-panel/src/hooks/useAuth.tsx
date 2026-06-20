@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+﻿import React, { createContext, useContext, useState, useEffect } from 'react';
 import { adminAuthService } from '../services/adminAuthService';
 import type { AdminSessionUser, LoginData } from '../types/admin';
 
@@ -28,7 +28,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       try {
         const currentAdmin = await adminAuthService.getCurrentAdmin();
-        localStorage.setItem('adminUser', JSON.stringify(currentAdmin));
+        adminAuthService.setStoredUser(currentAdmin);
         setUser(currentAdmin);
         setIsAuthenticated(true);
       } catch (_error) {

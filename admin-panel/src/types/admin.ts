@@ -1,12 +1,15 @@
-export interface AdminSessionUser {
+﻿export interface AdminSessionUser {
   id: string;
   name: string;
   email: string;
-  role: 'superadmin' | 'moderator';
-  status: 'active' | 'disabled';
+  role: 'SUPER_ADMIN' | 'ADMIN' | 'SUPPORT';
+  adminRole: 'SUPER_ADMIN' | 'ADMIN' | 'SUPPORT';
+  adminPermissions: string[];
+  adminStatus: 'active' | 'disabled';
+  forcePasswordChange: boolean;
   lastLoginAt?: string | null;
-  createdAt?: string;
-  updatedAt?: string;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 }
 
 export interface LoginData {

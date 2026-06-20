@@ -1,8 +1,13 @@
-const jwt = require("jsonwebtoken");
-const { Admin } = require("../../../models");
+﻿const jwt = require("jsonwebtoken");
+const { User } = require("../../../models");
 const env = require("../../../config/env");
 const ApiError = require("../../../utils/ApiError");
-const { hasPermission } = require("../../../middlewares/rbac");
+const {
+  hasAdminPermission,
+  isPlatformAdmin,
+  normalizeAdminRole,
+  normalizeAdminStatus,
+} = require("../adminAccess");
 
 function extractBearerToken(req) {
   const authHeader = req.headers.authorization || "";
@@ -16,13 +21,17 @@ async function resolveAdminFromToken(token) {
     throw new ApiError(401, "Invalid admin token");
   }
 
-  const admin = await Admin.findById(decoded.sub);
+  const admin = await User.findById(decoded.sub);
 
   if (!admin) {
     throw new ApiError(401, "Admin account not found");
   }
 
-  if (admin.status !== "active") {
+  if (!isPlatformAdmin(admin)) {
+    throw new ApiError(403, "This account does not have admin panel access.");
+  }
+
+  if (normalizeAdminStatus(admin.adminStatus) !== "active") {
     throw new ApiError(403, "Admin account is disabled");
   }
 
@@ -44,33 +53,25 @@ async function verifyAdminToken(req, _res, next) {
   }
 }
 
-async function optionalAdminToken(req, _res, next) {
-  try {
-    const token = extractBearerToken(req);
-
-    if (!token) {
-      next();
-      return;
-    }
-
-    req.admin = await resolveAdminFromToken(token);
-    next();
-  } catch (error) {
-    next(error);
+function requirePlatformAdmin(req, _res, next) {
+  if (!isPlatformAdmin(req.admin)) {
+    next(new ApiError(403, "This account does not have admin panel access."));
+    return;
   }
+
+  if (normalizeAdminStatus(req.admin.adminStatus) !== "active") {
+    next(new ApiError(403, "Admin account is disabled"));
+    return;
+  }
+
+  next();
 }
 
 function requireAdminRole(...roles) {
-  const roleAliases = {
-    owner: "superadmin",
-    superadmin: "superadmin",
-    admin: "admin",
-    moderator: "moderator",
-  };
-  const allowedRoles = roles.map((role) => roleAliases[String(role).toLowerCase()] || String(role).toLowerCase());
+  const allowedRoles = roles.map((role) => normalizeAdminRole(role)).filter(Boolean);
 
   return (req, _res, next) => {
-    const adminRole = roleAliases[String(req.admin?.role || "").toLowerCase()] || String(req.admin?.role || "").toLowerCase();
+    const adminRole = normalizeAdminRole(req.admin?.adminRole);
 
     if (!adminRole || !allowedRoles.includes(adminRole)) {
       next(new ApiError(403, "You do not have permission to access this admin resource"));
@@ -83,12 +84,7 @@ function requireAdminRole(...roles) {
 
 function requireAdminPermission(permission) {
   return (req, _res, next) => {
-    const adminUser = {
-      role: req.admin?.role === "superadmin" ? "owner" : req.admin?.role,
-      permissions: req.admin?.permissions,
-    };
-
-    if (!hasPermission(adminUser, permission)) {
+    if (!hasAdminPermission(req.admin, permission)) {
       next(new ApiError(403, `Permission denied: ${permission}`));
       return;
     }
@@ -98,9 +94,9 @@ function requireAdminPermission(permission) {
 }
 
 module.exports = {
-  verifyAdminToken,
-  optionalAdminToken,
-  requireAdminRole,
   requireAdminPermission,
+  requireAdminRole,
+  requirePlatformAdmin,
   resolveAdminFromToken,
+  verifyAdminToken,
 };

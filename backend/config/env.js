@@ -1,4 +1,4 @@
-require("dotenv").config({ quiet: true });
+﻿require("dotenv").config({ quiet: true });
 
 function parseNumber(value, fallback) {
   const parsed = Number(value);
@@ -93,12 +93,12 @@ const clientUrls = parseList(
   [defaultClientUrl, ...defaultLocalClientUrls],
 );
 const frontendUrl = parseString(process.env.FRONTEND_URL, clientUrls[0] || defaultClientUrl);
-const adminUrl = parseString(process.env.ADMIN_URL, productionAdminUrl);
+const adminUrl = parseString(process.env.ADMIN_PANEL_URL, parseString(process.env.ADMIN_FRONTEND_URL, parseString(process.env.ADMIN_URL, productionAdminUrl)));
 const backendUrl = normalizeHttpUrl(parseString(process.env.BACKEND_URL, `http://localhost:${port}`));
 const corsOrigins = parseList(process.env.CORS_ORIGINS, []);
 const adminClientUrls = parseList(
   process.env.ADMIN_CLIENT_URLS,
-  [process.env.ADMIN_CLIENT_URL || adminUrl, "http://localhost:3001"],
+  [process.env.ADMIN_CLIENT_URL || process.env.ADMIN_PANEL_URL || process.env.ADMIN_FRONTEND_URL || adminUrl, "http://localhost:3001"],
 );
 const allowedOrigins = [...new Set(
   [...corsOrigins, ...clientUrls, ...adminClientUrls, frontendUrl, adminUrl, productionFrontendUrl, productionAdminUrl]
@@ -140,8 +140,8 @@ const env = {
   admin: {
     jwtSecret: process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || "admin-super-secret-change-me",
     jwtExpiresIn: process.env.ADMIN_JWT_EXPIRES_IN || "12h",
-    bootstrapEmail: process.env.ADMIN_EMAIL || "admin@carbonflow.com",
-    bootstrapPassword: process.env.ADMIN_PASSWORD || "Admin@12345",
+    bootstrapEmail: parseString(process.env.ADMIN_EMAIL, ""),
+    bootstrapPassword: parseString(process.env.ADMIN_PASSWORD, ""),
   },
   mail: {
     host: parseString(process.env.SMTP_HOST, "smtp.gmail.com"),
@@ -237,3 +237,4 @@ validateEnv();
 
 module.exports = env;
 module.exports.validateEnv = validateEnv;
+

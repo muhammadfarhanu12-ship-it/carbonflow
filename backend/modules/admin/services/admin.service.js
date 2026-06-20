@@ -1,4 +1,4 @@
-const {
+﻿const {
   Admin,
   AuditLog,
   Company,
@@ -212,7 +212,7 @@ class AdminService {
       User.countDocuments(),
       Company.countDocuments(),
       Shipment.countDocuments(),
-      Admin.countDocuments(),
+      User.countDocuments({ isPlatformAdmin: true }),
       Report.countDocuments(),
       Report.countDocuments({ status: "PROCESSING" }),
       Shipment.aggregate([
@@ -626,3 +626,4 @@ class AdminService {
 }
 
 module.exports = AdminService;
+
